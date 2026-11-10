@@ -22,6 +22,7 @@ def login(connection):
             SELECT username, password, name, role, account_status
             FROM users
             WHERE username = ?
+            LIMIT 1;
             """,
             (username,),
         ).fetchone()
