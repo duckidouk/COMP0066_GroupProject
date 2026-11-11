@@ -6,9 +6,9 @@ DATABASE_PATH = "therapy_link.db"
 
 def login(connection):
     print("\n--- Login ---")
+    print("Enter 'q' to quit.\n")
 
     while True:
-        print("Enter 'q' to quit.")
         username = input("Username: ").strip()
 
         if username.lower() == "q":
@@ -28,7 +28,7 @@ def login(connection):
         ).fetchone()
 
         if user is None:
-            print(f"\nNo account found for {username}. Please try again.\n")
+            print(f"\nNo account found for \"{username}\". Please try again.\n")
             continue
 
         password = getpass.getpass("Password: ")
