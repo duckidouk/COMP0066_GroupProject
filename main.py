@@ -1,6 +1,10 @@
 import getpass
 import sqlite3
 from contextlib import closing
+
+from mood import ensure_daily_mood_entry
+from patient_menu import patient_menu
+
 DATABASE_PATH = "therapy_link.db"
 
 
@@ -21,7 +25,7 @@ def login(connection):
 
         user = connection.execute(
             """
-            SELECT username, password, name, role, account_status
+            SELECT user_id, username, password, name, role, account_status
             FROM users
             WHERE username = ?
             LIMIT 1;
@@ -51,10 +55,13 @@ def main():
             print("Login cancelled.")
             return
 
-        print(f"\nWelcome, {user['name']}! You are logged in as {user['role']}.")
+        print(f"\nWelcome, {user['name']}! You are logged in as {user['role']}.\n")
 
         if user["account_status"] == "disabled":
             print("This account is disabled; application features are unavailable.")
+        elif user["role"] == "patient":
+            ensure_daily_mood_entry(connection, user["user_id"])
+            patient_menu(connection, user)
 
 
 if __name__ == "__main__":
