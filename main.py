@@ -5,7 +5,9 @@ DATABASE_PATH = "therapy_link.db"
 
 
 def login(connection):
-    print("\n--- Login ---")
+    print("================================\n"
+      "             LOGIN\n"
+      "================================")
     print("Enter 'q' to quit.\n")
 
     while True:
