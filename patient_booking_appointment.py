@@ -308,4 +308,6 @@ with closing(sqlite3.connect(DATABASE_PATH)) as connection:
     user = connection.execute("SELECT * FROM users WHERE user_id = ?", (4,)).fetchone()
     patient_menu(connection, user)
 
-
+"""
+Had issues with datetime when import patient_menu. Also need to figure out what identifier we will use at all times (patientid or username)
+"""
