@@ -56,3 +56,4 @@ def ensure_daily_mood_entry(connection: sqlite3.Connection, patient_id: int) -> 
         f"\nMood score: {score} - {MOOD_DESCRIPTORS[score]}\n"
         f"Recorded at: {datetime.fromisoformat(created_at).strftime('%Y-%m-%d %H:%M:%S')}\n"
     )
+    input("Press Enter to continue to the main menu.")
