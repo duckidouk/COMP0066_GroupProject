@@ -4,7 +4,6 @@ from contextlib import closing
 
 from mood import ensure_daily_mood_entry
 from patient_menu import patient_menu
-from patient_booking_appointment import booking_flow
 
 DATABASE_PATH = "therapy_link.db"
 
