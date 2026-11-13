@@ -1,8 +1,4 @@
 """TherapyLink admin screens: a sketch of the command line interface, not the final app.
-
-Run by itself:     python admin_cli_prototype.py            (real keyboard input)
-Run the demo:      python admin_cli_prototype.py --demo     (scripted session, fixed date)
-
 Needs only core Python (sqlite3), plus Pandas for the reports.
 The schema is read from schema_stats.sql in the same folder.
 """
@@ -35,7 +31,7 @@ class Refused(Exception):
     """A rule of the app says no. Nothing has been changed."""
 
 
-# ---------------------------------------------------------------- small helpers
+# ----------------------------------------------------------------
 def ts(d):
     return d.strftime("%Y-%m-%d %H:%M")
 
@@ -65,9 +61,9 @@ def frame(conn, sql, params=()):
     return pd.DataFrame([tuple(r) for r in cur.fetchall()], columns=cols)
 
 
-# ---------------------------------------------------------------- input (A9)
+# ----------------------------------------------------------------
 SCRIPT = None          # a list of scripted answers when running the demo
-CURRENT = {}           # name -> menu number, so the demo can say "@Hana Kim"
+CURRENT = {}           # name -> menu number
 
 
 def set_menu(names):
@@ -326,8 +322,8 @@ def seed(conn):
             appt(pi, mi, when, st)
 
         # mood: one entry a day for 30 days, base 2 to 4 with noise of one point, so no accidental alerts
-        series = {1: [2, 2, 3, 3, 5, 5, 5],       # Liam Walker: a rise of 3 inside 7 days
-                  8: [3, 3, 4, 4, 6, 5, 4]}       # Zara Ahmed: a score of 6
+        series = {1: [2, 2, 3, 3, 5, 5, 5],     
+                  8: [3, 3, 4, 4, 6, 5, 4]}       
         for i, p in enumerate(pid):
             if names[i] == "Daniel Cole":
                 continue
@@ -462,7 +458,7 @@ def a2b_reallocate(conn, p):
     print("\n" + msg)
 
 
-# ---------------------------------------------------------------- users (A1, A3, A4, A5, A6)
+# ---------------------------------------------------------------- users
 def screen_users(conn):
     """First choose MHWPs or patients, then work in that list."""
     while True:
@@ -471,7 +467,7 @@ def screen_users(conn):
         print(f"   1  MHWPs ({counts.get('practitioner', 0)})")
         print(f"   2  Patients ({counts.get('patient', 0)})")
         print("   0  Back")
-        print("  The admin account is protected and is not listed.")      # A1
+        print("  The admin account is protected and is not listed.")     
         c = ask_number("Choose 1, 2 or 0: ", 0, 2)
         if c == 0:
             return
@@ -508,7 +504,7 @@ def user_list(conn, role):
             return
         u = rows[n - 1]
         try:
-            guard_admin(u)                         # A1: never true here, kept as a safety net
+            guard_admin(u)                         # never true here, kept as a safety net
             user_actions(conn, u["user_id"])
         except (Refused, sqlite3.Error) as e:
             print(f"\n  Nothing was changed. {e}")
@@ -692,7 +688,7 @@ def age_at(dob):
 
 
 def patient_30day_averages(conn):
-    """One row per active patient: their own 30 day average. Used by A8 and A8b."""
+    """One row per active patient: their own 30 day average."""
     df = frame(conn, """SELECT m.patient_id AS pid, m.score, u.gender, u.date_of_birth AS dob
                         FROM mood_entries m JOIN users u ON u.user_id = m.patient_id
                         WHERE u.role='patient' AND u.account_status='active'
