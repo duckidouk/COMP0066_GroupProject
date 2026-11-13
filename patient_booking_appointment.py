@@ -12,6 +12,7 @@ DATABASE_PATH = "therapy_link.db"
 #----------------- User Input Functions ------------------------------------------------
 
 max_number_of_days = 14 #Users can only look into booking appointments 2 weeks in advance
+working_hours = range(9,17)
 
 #Make the dates look pretty
 def pretty_format(day):
@@ -30,7 +31,7 @@ def ask_user_for_date(prompt):
         split_date = result.split("/")
         #print(splited_date)
         if len(split_date) != 2 or not all(split_date[i].isdigit() for i in range(len(split_date))):
-            print("Please enter a valid date as DD/MM - e.g. 11/18")
+            print("Please enter a valid date as DD/MM - e.g. 11/18\n")
             continue
 
         day,month = int(split_date[0]),int(split_date[1])
@@ -40,16 +41,16 @@ def ask_user_for_date(prompt):
             chosen_date = datetime.date(year,month,day)
             #print(chosen_date)
         except ValueError:
-            print("Thats not a valid date")
+            print("Thats not a valid date\n")
             continue
 
         if chosen_date < today_date: 
-            print('Selected date is in the past')
+            print('Selected date is in the past\n')
             continue
     
         return chosen_date
 
-#Selecting a date range
+#Selecting a date range in the appointment booking section
 def ask_user_for_date_range():
     today_date = datetime.date.today()
     while True:
@@ -64,7 +65,7 @@ def ask_user_for_date_range():
         elif end_date > today_date + datetime.timedelta(max_number_of_days):
             print(f"Appointments can only be booked up to {max_number_of_days} days ahead,"+str(today_date+datetime.timedelta(max_number_of_days)))
         else:
-            print("Searching for slots between: ",pretty_format(start_date),"--",pretty_format(end_date))
+            print("Searching for slots between: ",pretty_format(start_date),"--",pretty_format(end_date),'\n')
             return start_date,end_date
 
 def choose_slot(slots):
@@ -87,8 +88,36 @@ def user_confirmation(question_asked):
         else: 
             print('Please answer y or n')
 
+#----------------- Appointment Menu ---------------------------------------------
 
-#----------------- Appointment Booking / Checking Calendar Code ---------------------------------------------
+def appointment_menu(connection,patient_id):
+    while True:
+        prac_id = get_practitioner_id(connection,patient_id)
+        practitioner_name = get_practitioner_name(connection,prac_id)
+
+        print(
+            "\n================================\n"
+            "         APPOINTMENT MENU\n"
+            "================================\n\n"
+            f"1. Check calendar for {practitioner_name}\n"
+            "2. Make a Booking Request\n"
+            "3. Check Booking Summary\n"
+        )
+        choice = input("Choose an option (1-6): ").strip()
+
+        match choice:
+            case "1":
+                display_calendar(connection,prac_id)
+            case "2":
+                booking_flow(connection,patient_id)
+            case "3":
+                booking_summary(connection,patient_id)
+                return
+            case _:
+                print("Please enter a number from 1 to 3.")
+
+
+#----------------- Appointment Booking ---------------------------------------------
 
 #Get the assigned practioner's id to check their calendar
 def get_practitioner_id(connection, patient_id):
@@ -110,7 +139,9 @@ def get_practitioner_name(connection, practitioner_id):
     ).fetchone()
     return result["name"] if result else "Not Available"
 
-#Display the calendar 
+#-------------------------------------------------------------------
+#Display the calendar THIS SECTION STILL NEEDS WORK
+#-------------------------------------------------------------------
 def display_calendar(connection,practitioner_id):
     practitioner_name = get_practitioner_name(connection,practitioner_id)
     print("\nShowing you Calendar for:",practitioner_name)
@@ -129,11 +160,10 @@ def display_calendar(connection,practitioner_id):
             AND scheduled_time >= ? AND scheduled_time < ?
             AND status != 'cancelled'
             """,
-            (practitioner_id, month_beginning, month_end),
+            (practitioner_id, month_beginning.isoformat(), month_end.isoformat()),
         ).fetchall()
 
     return pract_calendar
-
 
 #Display available appointment slots for a practitioner    
 def display_available_slots(connection,practitioner_name, practitioner_id, startdate,enddate):
@@ -141,7 +171,7 @@ def display_available_slots(connection,practitioner_name, practitioner_id, start
     #Example time in schema= 2026-11-13T11:00:00
     #SQL converts datetime into 2026-11-13<space>11:00:00 --> so all need to be converted using the isoformat to ensure that the time comparison can happen!!!
 
-    print("\nShowing you Calendar for:",practitioner_name)
+    print("\nShowing you Calendar for:",practitioner_name,'\n')
 
     start_of_day = datetime.datetime.combine(startdate, datetime.time(9,0)).isoformat(timespec="seconds") 
     end_of_day = datetime.datetime.combine(enddate, datetime.time(17,0)).isoformat(timespec="seconds")
@@ -168,7 +198,7 @@ def display_available_slots(connection,practitioner_name, practitioner_id, start
     num = 1
     while startdate <= enddate:
         if startdate.weekday() < 5: #Only working Monday-Friday <--- TO BE DISCUSSED
-            for hour in range(9,17):
+            for hour in working_hours:
                 slot = datetime.datetime.combine(startdate,datetime.time(hour,0))
                 if slot not in booked_times and slot > now:
                     dict_available_slots[num] = slot
@@ -216,8 +246,23 @@ def make_appointment(connection,patient_id,practioner_id,selected_appointment_ti
         print("Sorry, that slot has just been taken. Please choose another.")
         return None
             
-    print('Your appointment has been booked for:',selected_appointment_time)
+    print('Your appointment booking has been requested for:',selected_appointment_time)
     return booking.lastrowid
+
+def booking_summary(connection, patient_id):
+    today = datetime.datetime.now()
+    list_of_bookings = connection.execute(
+        """
+        SELECT scheduled_time, status FROM appointments
+        WHERE patient_id = ? AND status != 'cancelled'
+        ORDER BY scheduled_time
+        """,
+        (patient_id,),
+    ).fetchall()          
+
+    for row in list_of_bookings:
+        booking = datetime.datetime.fromisoformat(row["scheduled_time"])
+        print(f"{booking:%a %d %B at %H:%M}  -  {row['status']}")
 
 #----------------- The flow of the Appointment booking process ---------------------------------------------
 
@@ -268,45 +313,17 @@ def booking_flow(connection,patient_id):
         if appointment_id is not None:
             return appointment_id
 
-#----------------- Running the Query ---------------------------------------------
-def patient_menu(connection: sqlite3.Connection, user: sqlite3.Row) -> None:
-    patient_id = user["user_id"]
-
-    while True:
-        print(
-            "\n================================\n"
-            "          PATIENT MENU\n"
-            "================================\n\n"
-            "1. Log a journal entry\n"
-            "2. Amend personal details\n"
-            "3. Urgent support numbers\n"
-            "4. Appointments\n"
-            "5. Meditation and relaxation resources (not yet integrated)\n"
-            "6. Log out\n"
-        )
-        choice = input("Choose an option (1-6): ").strip()
-
-        match choice:
-            case "4":
-                booking_flow(connection,patient_id)
-            case "5":
-                print("This feature will be available when its module is integrated.")
-            case "6":
-                print("You have been logged out.")
-                return
-            case _:
-                print("Please enter a number from 1 to 6.")
-
+#----------------- Running the Query / Testing ---------------------------------------------
 
 with closing(sqlite3.connect(DATABASE_PATH)) as connection:
     connection.row_factory = sqlite3.Row  # lets you use row["column_name"]
     #print(get_practitioner_id(connection, 4))
     #(display_available_slots(connection,"mhwp1","2",date.today()+datetime.timedelta(1),date.today()+datetime.timedelta(2)))
-    #booking_flow(connection,4)  
-    
-
-    user = connection.execute("SELECT * FROM users WHERE user_id = ?", (4,)).fetchone()
-    patient_menu(connection, user)
+    #booking_flow(connection,4) 
+    #booking_summary(connection,4) 
+    #user = connection.execute("SELECT * FROM users WHERE user_id = ?", (4,)).fetchone()
+    #patient_menu(connection,user)
+    #appointment_menu(connection,4)
 
 """
 Had issues with datetime when import patient_menu. Also need to figure out what identifier we will use at all times (patientid or username)
