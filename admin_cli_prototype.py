@@ -752,6 +752,105 @@ def a8_mood_groups(conn):
     print("\n  By age band")
     group_table(per, "band")
     print(f"\n  Based on {int(per['entries'].sum())} entries from {len(per)} patients.")
+    week_group_menu(conn, per)
+
+
+def text_bar(value, per_point=6):
+    """A bar of value * per_point characters, drawn to 1/8 of a character so small changes show."""
+    eighths = round(value * per_point * 8)
+    return "█" * (eighths // 8) + ("", "▏", "▎", "▍", "▌", "▋", "▊", "▉")[eighths % 8]
+
+
+def week_group_days(conn, per):
+    """Last 7 days for each gender and age band group, using the same patients as the tables above.
+    Returns (days, groups). Each group is a dict: col, key, patients, daily {day: average or None}.
+    A day is None when fewer than MIN_GROUP patients in the group logged a mood that day."""
+    days = [(NOW - timedelta(days=d)).strftime("%Y-%m-%d") for d in range(6, -1, -1)]
+    df = frame(conn, """SELECT patient_id AS pid, date(created_at) AS day, score FROM mood_entries
+                        WHERE date(created_at) >= ? AND created_at <= ?""", [days[0], ts(NOW)])
+    df = df[df["pid"].isin(per.index)].join(per[["gender", "band"]], on="pid")
+    groups = []
+    for col in ("gender", "band"):
+        for key, members in per.groupby(col):
+            g = df[df[col] == key]
+            avg, n = g.groupby("day")["score"].mean(), g.groupby("day")["pid"].nunique()
+            daily = {d: (avg[d] if n.get(d, 0) >= MIN_GROUP else None) for d in days}
+            groups.append({"col": col, "key": key, "patients": len(members), "daily": daily})
+    return days, groups
+
+
+def week_trend(daily):
+    """(first 3 days average, last 3 days average, word), or None if there are too few days shown.
+    3 days against 3 days, so one odd day does not decide it."""
+    shown = [v for v in daily.values() if v is not None]
+    if len(shown) < 6:
+        return None
+    first, last = sum(shown[:3]) / 3, sum(shown[-3:]) / 3
+    word = "worse" if last - first >= 0.05 else "better" if last - first <= -0.05 else "about the same"
+    return first, last, word
+
+
+def week_group_menu(conn, per):
+    """First choose gender or age band, then a group, then see its day by day bar chart."""
+    days, groups = week_group_days(conn, per)
+    while True:
+        heading("MOOD BY GROUP: LAST 7 DAYS")
+        print("   1  By gender\n   2  By age band\n   0  Back")
+        c = ask_number("Choose 1, 2 or 0: ", 0, 2)
+        if c == 0:
+            return
+        col = "gender" if c == 1 else "band"
+        week_group_list(days, [g for g in groups if g["col"] == col],
+                        "BY GENDER" if col == "gender" else "BY AGE BAND")
+
+
+def week_group_list(days, groups, title):
+    """One line per group in this category, then the chart for the group chosen."""
+    visible = [g for g in groups if g["patients"] >= MIN_GROUP]
+    hidden = [g["key"] for g in groups if g["patients"] < MIN_GROUP]
+    while True:
+        heading(f"MOOD {title}: LAST 7 DAYS")
+        print("  First 3 days against last 3 days. 1 is best, 6 is worst.\n")
+        if not visible:
+            print(f"  Every group has fewer than {MIN_GROUP} patients, so all are hidden.")
+            return
+        print(f"{'No':>3}  {'Group':<20}{'Patients':>8}{'First 3':>9}{'Last 3':>8}  Trend")
+        for i, g in enumerate(visible, 1):
+            t = week_trend(g["daily"])
+            cells = f"{t[0]:>9.2f}{t[1]:>8.2f}  {t[2]}" if t else f"{'not enough days':>25}"
+            print(f"{i:>3}  {g['key']:<20}{g['patients']:>8}{cells}")
+        if hidden:
+            print(f"\n  Hidden (fewer than {MIN_GROUP} patients): {', '.join(hidden)}")
+        set_menu([g["key"] for g in visible])
+        n = ask_number("Choose a group to see day by day, or 0 to go back: ", 0, len(visible))
+        if n == 0:
+            return
+        week_group_detail(days, visible[n - 1])
+
+
+def week_group_detail(days, g):
+    heading(f"{g['key'].upper()}: LAST 7 DAYS ({g['patients']} patients)")
+    print("  Average mood per day. 1 is best, 6 is worst, so a longer bar is a worse day.")
+    print(f"  A day with fewer than {MIN_GROUP} patients in the group is hidden.\n")
+    prev = None
+    for day in days:
+        label = datetime.strptime(day, "%Y-%m-%d").strftime("%a %d/%m")
+        avg = g["daily"][day]
+        if avg is None:
+            print(f"    {label}  (hidden or no entries)")
+            prev = None
+            continue
+        change = ""
+        if prev is not None:
+            diff = avg - prev
+            change = ("▲ worse" if diff >= 0.05 else "▼ better" if diff <= -0.05 else "  same") + f" {diff:+.2f}"
+        print(f"    {label}  {text_bar(avg):<37} {avg:.2f}  {change}")
+        prev = avg
+    shown = [v for v in g["daily"].values() if v is not None]
+    t = week_trend(g["daily"])
+    if t:
+        print(f"\n    First 3 days {t[0]:.2f}, last 3 days {t[1]:.2f}: {t[2]}. "
+              f"Best day {min(shown):.2f}, worst day {max(shown):.2f}.")
 
 
 def alert_count(conn):
@@ -834,7 +933,10 @@ DEMO_SCRIPT = [
     # allocations again, to see the re enabled patient has no MHWP
     "1", "0",
     # reports
-    "3", "1", "2", "3", "4", "0",
+    "3", "1", "2",
+    "1", "@male", "0",                                 # report 2: by gender, open male
+    "2", "@18 to 24", "0", "0",                        # by age band, open 18 to 24, back
+    "3", "4", "0",
     # log out
     "4",
 ]
