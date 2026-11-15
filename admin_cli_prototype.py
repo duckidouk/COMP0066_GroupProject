@@ -831,20 +831,20 @@ def week_group_list(days, groups, title):
 def week_group_detail(days, g):
     heading(f"{g['key'].upper()}: LAST 7 DAYS ({g['patients']} patients)")
     print("  Average mood per day. 1 is best, 6 is worst, so a longer bar is a worse day.")
-    print(f"  A day with fewer than {MIN_GROUP} patients in the group is hidden.\n")
+    print(f"  A day with fewer than {MIN_GROUP} patients in the group is hidden.")
     prev = None
     for day in days:
         label = datetime.strptime(day, "%Y-%m-%d").strftime("%a %d/%m")
         avg = g["daily"][day]
         if avg is None:
-            print(f"    {label}  (hidden or no entries)")
+            print(f"\n    {label}  (hidden or no entries)")
             prev = None
             continue
         change = ""
         if prev is not None:
             diff = avg - prev
             change = ("▲ worse" if diff >= 0.05 else "▼ better" if diff <= -0.05 else "  same") + f" {diff:+.2f}"
-        print(f"    {label}  {text_bar(avg):<37} {avg:.2f}  {change}")
+        print(f"\n    {label}  {text_bar(avg):<37} {avg:.2f}  {change}")
         prev = avg
     shown = [v for v in g["daily"].values() if v is not None]
     t = week_trend(g["daily"])
