@@ -851,6 +851,7 @@ def week_group_detail(days, g):
     if t:
         print(f"\n    First 3 days {t[0]:.2f}, last 3 days {t[1]:.2f}: {t[2]}. "
               f"Best day {min(shown):.2f}, worst day {max(shown):.2f}.")
+    ask("\nPress Enter to go back to the list: ")      # pause, so the chart is not pushed off the screen
 
 
 def alert_count(conn):
@@ -934,8 +935,8 @@ DEMO_SCRIPT = [
     "1", "0",
     # reports
     "3", "1", "2",
-    "1", "@male", "0",                                 # report 2: by gender, open male
-    "2", "@18 to 24", "0", "0",                        # by age band, open 18 to 24, back
+    "1", "@male", "", "0",                             # report 2: by gender, open male, Enter
+    "2", "@18 to 24", "", "0", "0",                    # by age band, open 18 to 24, Enter, back
     "3", "4", "0",
     # log out
     "4",
