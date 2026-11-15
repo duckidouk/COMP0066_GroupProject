@@ -1,4 +1,8 @@
 """TherapyLink admin screens: a sketch of the command line interface, not the final app.
+
+Run by itself:     python admin_cli_prototype.py            (real keyboard input)
+Run the demo:      python admin_cli_prototype.py --demo     (scripted session, fixed date)
+
 Needs only core Python (sqlite3), plus Pandas for the reports.
 The schema is read from schema_stats.sql in the same folder.
 """
@@ -9,6 +13,7 @@ import re
 import sqlite3
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 
@@ -31,7 +36,7 @@ class Refused(Exception):
     """A rule of the app says no. Nothing has been changed."""
 
 
-# ----------------------------------------------------------------
+# ---------------------------------------------------------------- small helpers
 def ts(d):
     return d.strftime("%Y-%m-%d %H:%M")
 
@@ -61,9 +66,9 @@ def frame(conn, sql, params=()):
     return pd.DataFrame([tuple(r) for r in cur.fetchall()], columns=cols)
 
 
-# ----------------------------------------------------------------
+# ---------------------------------------------------------------- input (A9)
 SCRIPT = None          # a list of scripted answers when running the demo
-CURRENT = {}           # name -> menu number
+CURRENT = {}           # name -> menu number, so the demo can say "@Hana Kim"
 
 
 def set_menu(names):
@@ -91,7 +96,7 @@ def ask_number(prompt, lo, hi):
         print(f"  Please type a number from {lo} to {hi}.")
 
 
-def ask_yes_no(prompt):
+def ask_confirm(prompt):
     while True:
         v = ask(prompt).lower()
         if v in ("y", "n"):
@@ -108,8 +113,14 @@ def ask_valid(prompt, parser):
 
 
 def parse_name(v):
-    if not v or len(v) > 60:
-        return None, "The name must be 1 to 60 characters."
+    """Realistic names only (the brief asks us to refuse infeasible names). This is about realism,
+    NOT about SQL injection: that is prevented by the ? placeholders in every query."""
+    v = " ".join(v.replace("\u2019", "'").split())          # trim, collapse spaces, straight apostrophe
+    if not 2 <= len(v) <= 60:
+        return None, "The name must be 2 to 60 characters."
+    # letters (any language), optionally ending in a full stop, joined by one space, hyphen or apostrophe
+    if not re.fullmatch(r"[^\W\d_]+\.?(?:(?: |['\-])[^\W\d_]+\.?)*", v):
+        return None, "Use letters only, with spaces, hyphens or apostrophes between parts. Example: Mary-Jane O'Neil"
     return v, None
 
 
@@ -147,6 +158,15 @@ def connect(path=DB):
 
 def get_user(conn, uid):
     return conn.execute("SELECT * FROM users WHERE user_id=?", (uid,)).fetchone()
+
+
+def require_user(conn, uid):
+    """Like get_user, but a missing user is a clear refusal, not a crash. A user can disappear between
+    showing the list and acting on it (for example another terminal deleted them)."""
+    u = get_user(conn, uid)
+    if u is None:
+        raise Refused("That user no longer exists. The list may be out of date.")
+    return u
 
 
 def live_rows(conn, user_id=None, patient_id=None, practitioner_id=None):
@@ -195,14 +215,19 @@ def guard_admin(u):
 
 def allocate(conn, patient_id, mhwp_id):
     with conn:
-        conn.execute("UPDATE patient_profiles SET assigned_practitioner_id=? WHERE patient_id=?",
-                     (mhwp_id, patient_id))
+        cur = conn.execute("UPDATE patient_profiles SET assigned_practitioner_id=? WHERE patient_id=?",
+                           (mhwp_id, patient_id))
+        if cur.rowcount == 0:                         # no such patient profile: do not pretend it worked
+            raise Refused("That patient no longer exists. The list may be out of date.")
 
 
 def reallocate(conn, patient_id, new_mhwp_id):
     with conn:                                    # one transaction: all or nothing
-        old = conn.execute("SELECT assigned_practitioner_id FROM patient_profiles WHERE patient_id=?",
-                           (patient_id,)).fetchone()[0]
+        row = conn.execute("SELECT assigned_practitioner_id FROM patient_profiles WHERE patient_id=?",
+                           (patient_id,)).fetchone()
+        if row is None:
+            raise Refused("That patient no longer exists. The list may be out of date.")
+        old = row[0]
         rows = live_rows(conn, patient_id=patient_id, practitioner_id=old) if old else []
         n = cancel_and_email(conn, rows, "the patient was reallocated to another MHWP")
         conn.execute("UPDATE patient_profiles SET assigned_practitioner_id=? WHERE patient_id=?",
@@ -214,7 +239,7 @@ def update_field(conn, uid, col, value):
     if col not in {"name", "email", "gender", "date_of_birth"}:
         raise ValueError(col)
     with conn:
-        u = get_user(conn, uid)
+        u = require_user(conn, uid)
         guard_admin(u)
         if u["account_status"] == "disabled":
             raise Refused("A disabled user cannot be edited. Re enable first.")
@@ -223,7 +248,7 @@ def update_field(conn, uid, col, value):
 
 def delete_user(conn, uid):
     with conn:
-        u = get_user(conn, uid)
+        u = require_user(conn, uid)
         guard_admin(u)
         rows = live_rows(conn, user_id=uid)
         n = cancel_and_email(conn, rows, f"the account of {u['name']} was deleted")
@@ -233,7 +258,7 @@ def delete_user(conn, uid):
 
 def disable_user(conn, uid):
     with conn:
-        u = get_user(conn, uid)
+        u = require_user(conn, uid)
         guard_admin(u)
         if u["account_status"] == "disabled":
             raise Refused("This user is already disabled.")
@@ -251,7 +276,7 @@ def disable_user(conn, uid):
 
 def reenable_user(conn, uid):
     with conn:
-        u = get_user(conn, uid)
+        u = require_user(conn, uid)
         if u["account_status"] != "disabled":
             raise Refused("This user is not disabled.")
         conn.execute("UPDATE users SET account_status='active', disabled_at=NULL WHERE user_id=?", (uid,))
@@ -322,8 +347,8 @@ def seed(conn):
             appt(pi, mi, when, st)
 
         # mood: one entry a day for 30 days, base 2 to 4 with noise of one point, so no accidental alerts
-        series = {1: [2, 2, 3, 3, 5, 5, 5],     
-                  8: [3, 3, 4, 4, 6, 5, 4]}       
+        series = {1: [2, 2, 3, 3, 5, 5, 5],       # Liam Walker: a rise of 3 inside 7 days
+                  8: [3, 3, 4, 4, 6, 5, 4]}       # Zara Ahmed: a score of 6
         for i, p in enumerate(pid):
             if names[i] == "Daniel Cole":
                 continue
@@ -430,7 +455,7 @@ def a2_allocate(conn, p):
         print("  Cancelled.")
         return
     print(f"\nAllocating {p['name']} to {m['name']}.")
-    if not ask_yes_no(f"Are you sure? (y/n): "):
+    if not ask_confirm(f"Are you sure? (y/n): "):
         print("  Nothing was changed.")
         return
     allocate(conn, p["user_id"], m["user_id"])
@@ -438,8 +463,11 @@ def a2_allocate(conn, p):
 
 
 def a2b_reallocate(conn, p):
-    cur = conn.execute("SELECT assigned_practitioner_id AS a FROM patient_profiles WHERE patient_id=?",
-                       (p["user_id"],)).fetchone()["a"]
+    row = conn.execute("SELECT assigned_practitioner_id AS a FROM patient_profiles WHERE patient_id=?",
+                       (p["user_id"],)).fetchone()
+    if row is None:
+        raise Refused("That patient no longer exists. The list may be out of date.")
+    cur = row["a"]
     print(f"\nREALLOCATE: {p['name']} is with {p['mname']}")
     m = pick_mhwp(conn, exclude_id=cur)
     if m is None:
@@ -448,7 +476,7 @@ def a2b_reallocate(conn, p):
     rows = live_rows(conn, patient_id=p["user_id"], practitioner_id=cur)
     print(f"\nMoving {p['name']} from {p['mname']} to {m['name']}.")
     bookings_block(rows)                          # prints "none" when there are no bookings
-    if not ask_yes_no("Are you sure? (y/n): "):
+    if not ask_confirm("Are you sure? (y/n): "):
         print("  Nothing was changed.")
         return
     n = reallocate(conn, p["user_id"], m["user_id"])
@@ -458,7 +486,7 @@ def a2b_reallocate(conn, p):
     print("\n" + msg)
 
 
-# ---------------------------------------------------------------- users
+# ---------------------------------------------------------------- users (A1, A3, A4, A5, A6)
 def screen_users(conn):
     """First choose MHWPs or patients, then work in that list."""
     while True:
@@ -467,7 +495,7 @@ def screen_users(conn):
         print(f"   1  MHWPs ({counts.get('practitioner', 0)})")
         print(f"   2  Patients ({counts.get('patient', 0)})")
         print("   0  Back")
-        print("  The admin account is protected and is not listed.")     
+        print("  The admin account is protected and is not listed.")      # A1
         c = ask_number("Choose 1, 2 or 0: ", 0, 2)
         if c == 0:
             return
@@ -504,14 +532,14 @@ def user_list(conn, role):
             return
         u = rows[n - 1]
         try:
-            guard_admin(u)                         # never true here, kept as a safety net
+            guard_admin(u)                         # A1: never true here, kept as a safety net
             user_actions(conn, u["user_id"])
         except (Refused, sqlite3.Error) as e:
             print(f"\n  Nothing was changed. {e}")
 
 
 def user_actions(conn, uid):
-    u = get_user(conn, uid)
+    u = require_user(conn, uid)
     heading(f"{u['name']} ({ROLE[u['role']]}, {u['account_status']})")
     if u["account_status"] == "active":
         print("   1  Edit details\n   2  Delete user\n   3  Disable user\n   0  Back")
@@ -526,7 +554,7 @@ def user_actions(conn, uid):
 
 
 def a3_edit(conn, uid):
-    u = get_user(conn, uid)
+    u = require_user(conn, uid)
     fields = [("name", "Name"), ("email", "Email")]
     if u["role"] == "patient":
         fields += [("gender", "Gender"), ("date_of_birth", "Date of birth")]
@@ -558,7 +586,7 @@ def a3_edit(conn, uid):
 
 
 def a4_delete(conn, uid):
-    u = get_user(conn, uid)
+    u = require_user(conn, uid)
     heading(f"DELETE USER: {u['name']} ({ROLE[u['role']]}, {u['account_status']})")
     q = lambda sql: conn.execute(sql, (uid,)).fetchone()[0]
     if u["role"] == "patient":
@@ -579,7 +607,7 @@ def a4_delete(conn, uid):
         print(f"   patients left without an MHWP ({len(pats)}): {', '.join(pats) or 'none'}")
     bookings_block(live_rows(conn, user_id=uid))
     print("This cannot be undone.")
-    if not ask_yes_no("Continue? (y/n): "):
+    if not ask_confirm("Continue? (y/n): "):
         print("  Nothing was changed.")
         return
     n = delete_user(conn, uid)
@@ -588,7 +616,7 @@ def a4_delete(conn, uid):
 
 
 def a5_disable(conn, uid):
-    u = get_user(conn, uid)
+    u = require_user(conn, uid)
     heading(f"DISABLE USER: {u['name']} ({ROLE[u['role']]}, active)")
     print("The account is frozen. Only log in and log out stay possible.")
     if u["role"] == "patient":
@@ -602,7 +630,7 @@ def a5_disable(conn, uid):
         print(f"   patients who lose their MHWP ({len(pats)}): {', '.join(pats) or 'none'}")
     bookings_block(live_rows(conn, user_id=uid))
     print("Cancelled bookings are not restored if the account is re enabled.")
-    if not ask_yes_no("Continue? (y/n): "):
+    if not ask_confirm("Continue? (y/n): "):
         print("  Nothing was changed.")
         return
     n = disable_user(conn, uid)
@@ -611,7 +639,7 @@ def a5_disable(conn, uid):
 
 
 def a6_reenable(conn, uid):
-    u = get_user(conn, uid)
+    u = require_user(conn, uid)
     reenable_user(conn, uid)
     print(f"\n  Done. {u['name']} is active again.")
     if u["role"] == "patient":
@@ -688,7 +716,7 @@ def age_at(dob):
 
 
 def patient_30day_averages(conn):
-    """One row per active patient: their own 30 day average."""
+    """One row per active patient: their own 30 day average. Used by A8 and A8b."""
     df = frame(conn, """SELECT m.patient_id AS pid, m.score, u.gender, u.date_of_birth AS dob
                         FROM mood_entries m JOIN users u ON u.user_id = m.patient_id
                         WHERE u.role='patient' AND u.account_status='active'
@@ -817,10 +845,9 @@ def main():
     demo = "--demo" in sys.argv
     if demo:
         SCRIPT = list(DEMO_SCRIPT)
-        if os.path.exists(DB):
-            os.remove(DB)
-    conn = connect()
-    conn.executescript(open(SCHEMA).read())
+    # The demo runs in memory: always fresh, and no file is ever deleted. utf-8-sig also accepts a BOM.
+    conn = connect(":memory:" if demo else DB)
+    conn.executescript(Path(SCHEMA).read_text(encoding="utf-8-sig"))
     seed(conn)
     while True:
         admin = login(conn)
