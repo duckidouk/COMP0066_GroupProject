@@ -29,6 +29,7 @@ GENDERS = [("female", "female"), ("male", "male"),
            ("non_binary", "non binary"), ("prefer_not_to_say", "prefer not to say")]
 GENDER_LABEL = dict(GENDERS)
 MIN_GROUP = 3          # smaller groups are hidden in the reports
+TREND_STEP = 0.3       # a week trend smaller than this (in mood points) is "about the same"
 WIDTH = 58
 
 
@@ -679,7 +680,7 @@ def mood_trend(conn, days=30):
         print(f"  {show_date(day):<11}{bar:<26}{r['mean']:>7.2f}{int(r['count']):>9}")
     if len(daily) >= 14:                                # compare whole weeks, so one odd day does not decide it
         first, last = daily["mean"].iloc[:7].mean(), daily["mean"].iloc[-7:].mean()
-        change = "worse" if last > first else "better" if last < first else "the same"
+        change = "worse" if last - first >= TREND_STEP else "better" if last - first <= -TREND_STEP else "about the same"
         print(f"\n  First week average {first:.2f}, last week average {last:.2f}: mood is {change}.")
 
 
@@ -786,7 +787,7 @@ def week_trend(daily):
     if len(shown) < 6:
         return None
     first, last = sum(shown[:3]) / 3, sum(shown[-3:]) / 3
-    word = "worse" if last - first >= 0.05 else "better" if last - first <= -0.05 else "about the same"
+    word = "worse" if last - first >= TREND_STEP else "better" if last - first <= -TREND_STEP else "about the same"
     return first, last, word
 
 
@@ -846,11 +847,11 @@ def week_group_detail(days, g):
             change = ("▲ worse" if diff >= 0.05 else "▼ better" if diff <= -0.05 else "  same") + f" {diff:+.2f}"
         print(f"\n    {label}  {text_bar(avg):<37} {avg:.2f}  {change}")
         prev = avg
-    shown = [v for v in g["daily"].values() if v is not None]
-    t = week_trend(g["daily"])
-    if t:
-        print(f"\n    First 3 days {t[0]:.2f}, last 3 days {t[1]:.2f}: {t[2]}. "
-              f"Best day {min(shown):.2f}, worst day {max(shown):.2f}.")
+    shown = {day: v for day, v in g["daily"].items() if v is not None}
+    if len(shown) >= 2:                                 # lowest score is the best day
+        best, worst = min(shown, key=shown.get), max(shown, key=shown.get)
+        name = lambda day: datetime.strptime(day, "%Y-%m-%d").strftime("%a")
+        print(f"\n    Best day {shown[best]:.2f} ({name(best)}), worst day {shown[worst]:.2f} ({name(worst)}).")
     ask("\nPress Enter to go back to the list: ")      # pause, so the chart is not pushed off the screen
 
 
