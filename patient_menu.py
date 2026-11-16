@@ -4,6 +4,7 @@ from typing import Callable
 
 from utils import is_valid_email, is_valid_name
 
+from resource_search import patient_resources
 
 def prompt_for_personal_detail(prompt: str) -> str | None:
     value = input(f"{prompt}: ").strip()
@@ -167,7 +168,7 @@ def patient_menu(connection: sqlite3.Connection, user: sqlite3.Row) -> None:
             "2. Amend personal details\n"
             "3. Urgent support numbers\n"
             "4. Appointments (not yet integrated)\n"
-            "5. Meditation and relaxation resources (not yet integrated)\n"
+            "5. Meditation and relaxation resources\n"
             "6. Log out\n"
         )
         choice = input("Choose an option (1-6): ").strip()
@@ -179,8 +180,10 @@ def patient_menu(connection: sqlite3.Connection, user: sqlite3.Row) -> None:
                 edit_personal_details(connection, patient_id)
             case "3":
                 show_urgent_support_numbers()
-            case "4" | "5":
+            case "4":
                 print("This feature will be available when its module is integrated.")
+            case "5":
+                patient_resources(connection)
             case "6":
                 print("You have been logged out.")
                 return
