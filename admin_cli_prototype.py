@@ -1,7 +1,6 @@
 """TherapyLink admin screens: a sketch of the command line interface, not the final app.
 
-Run by itself:     python admin_cli_prototype.py            (real keyboard input)
-Run the demo:      python admin_cli_prototype.py --demo     (scripted session, fixed date)
+Run:     python admin_cli_prototype.py
 
 Needs only core Python (sqlite3), plus Pandas for the reports.
 The schema is read from schema_stats.sql in the same folder.
@@ -19,16 +18,25 @@ import pandas as pd
 
 # When this file runs as a script, Python names it "__main__". The next line also registers it as
 # "admin_cli_prototype", so admin_extras.py gets THIS copy when it imports it, not a second copy
-# with its own demo script and menu state.
 sys.modules.setdefault("admin_cli_prototype", sys.modules[__name__])
-import admin_extras as extras       # the features we added beyond the brief
+import admin_extras as extras
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCHEMA = os.path.join(HERE, "schema_stats.sql")
 DB = os.environ.get("DB_PATH", os.path.join(HERE, "therapylink_demo.db"))
 
-# A fixed "now" keeps the demo repeatable. The real app would use datetime.now().
-NOW = datetime(2026, 11, 12, 10, 0)
+_fixed_now = None      # None means the real time. Tests set a fixed time with set_now().
+
+
+def now():
+    """The current time. Every date rule in this file uses it, so a test can fix the time."""
+    return _fixed_now or datetime.now()
+
+
+def set_now(when):
+    """For tests only: make now() return this datetime. set_now(None) goes back to the real time."""
+    global _fixed_now
+    _fixed_now = when
 
 ROLE = {"admin": "admin", "practitioner": "MHWP", "patient": "patient"}
 GENDERS = [("female", "female"), ("male", "male"),
@@ -56,7 +64,8 @@ def show_date(iso):
 
 
 def week_bounds():
-    monday = (NOW - timedelta(days=NOW.weekday())).replace(hour=0, minute=0)
+    today = now()
+    monday = (today - timedelta(days=today.weekday())).replace(hour=0, minute=0)
     return monday, monday + timedelta(days=7)
 
 
@@ -73,25 +82,8 @@ def frame(conn, sql, params=()):
 
 
 # ---------------------------------------------------------------- input (A9)
-SCRIPT = None          # a list of scripted answers when running the demo
-CURRENT = {}           # name -> menu number, so the demo can say "@Hana Kim"
-
-
-def set_menu(names):
-    CURRENT.clear()
-    CURRENT.update({n: i for i, n in enumerate(names, 1)})
-
-
 def ask(prompt):
-    if SCRIPT is None:
-        return input(prompt).strip()
-    if not SCRIPT:
-        raise SystemExit("[demo script ended]")
-    v = SCRIPT.pop(0)
-    if v.startswith("@"):
-        v = str(CURRENT[v[1:]])
-    print(prompt + v)
-    return v.strip()
+    return input(prompt).strip()
 
 
 def ask_number(prompt, lo, hi):
@@ -149,7 +141,7 @@ def parse_dob(v):
     if not 1 <= day <= last:
         return None, f"{calendar.month_name[month]} {year} has {last} days, so {day} is not a valid day."
     d = datetime(year, month, day)
-    if d > NOW:
+    if d > now():
         return None, "A date of birth cannot be in the future."
     return d.strftime("%Y-%m-%d"), None
 
@@ -175,6 +167,17 @@ def require_user(conn, uid):
     return u
 
 
+def require_active(conn, uid, role):
+    """The user must exist, have this role, and be active. Call it inside the transaction, just before
+    the change, because the user can be deleted or disabled after the list was shown."""
+    u = require_user(conn, uid)
+    if u["role"] != role:
+        raise Refused(f"{u['name']} is not {'a patient' if role == 'patient' else 'an ' + ROLE[role]}.")
+    if u["account_status"] != "active":
+        raise Refused(f"{u['name']} is disabled. Re enable the account first.")
+    return u
+
+
 def live_rows(conn, user_id=None, patient_id=None, practitioner_id=None):
     """Future requested or confirmed bookings, optionally filtered."""
     sql = """SELECT a.*, p.name AS pname, p.email AS pemail, m.name AS mname, m.email AS memail
@@ -182,7 +185,7 @@ def live_rows(conn, user_id=None, patient_id=None, practitioner_id=None):
              JOIN users p ON p.user_id = a.patient_id
              JOIN users m ON m.user_id = a.practitioner_id
              WHERE a.status IN ('requested','confirmed') AND a.scheduled_time > ?"""
-    params = [ts(NOW)]
+    params = [ts(now())]
     if user_id is not None:
         sql += " AND (a.patient_id=? OR a.practitioner_id=?)"
         params += [user_id, user_id]
@@ -197,7 +200,7 @@ def live_rows(conn, user_id=None, patient_id=None, practitioner_id=None):
 
 def write_email(conn, to_user_id, address, subject, body):
     conn.execute("INSERT INTO emails(to_user_id,to_address,subject,body,sent_at) VALUES (?,?,?,?,?)",
-                 (to_user_id, address, subject, body, ts(NOW)))
+                 (to_user_id, address, subject, body, ts(now())))
 
 
 def cancel_and_email(conn, rows, reason):
@@ -221,6 +224,8 @@ def guard_admin(u):
 
 def allocate(conn, patient_id, mhwp_id):
     with conn:
+        require_active(conn, patient_id, "patient")
+        require_active(conn, mhwp_id, "practitioner")
         cur = conn.execute("UPDATE patient_profiles SET assigned_practitioner_id=? WHERE patient_id=?",
                            (mhwp_id, patient_id))
         if cur.rowcount == 0:                         # no such patient profile: do not pretend it worked
@@ -229,6 +234,8 @@ def allocate(conn, patient_id, mhwp_id):
 
 def reallocate(conn, patient_id, new_mhwp_id):
     with conn:                                    # one transaction: all or nothing
+        require_active(conn, patient_id, "patient")
+        require_active(conn, new_mhwp_id, "practitioner")
         row = conn.execute("SELECT assigned_practitioner_id FROM patient_profiles WHERE patient_id=?",
                            (patient_id,)).fetchone()
         if row is None:
@@ -276,7 +283,7 @@ def disable_user(conn, uid):
             conn.execute("UPDATE patient_profiles SET assigned_practitioner_id=NULL "
                          "WHERE assigned_practitioner_id=?", (uid,))
         conn.execute("UPDATE users SET account_status='disabled', disabled_at=? WHERE user_id=?",
-                     (ts(NOW), uid))
+                     (ts(now()), uid))
     return n
 
 
@@ -306,6 +313,7 @@ def seed(conn):
     import sample_data as team                    # the team's sample data (sample_data.py)
     rng = random.Random(7)
     created = "2026-09-01 09:00"
+    today = now()                                 # moods are made for the 30 days before this time
 
     def add_user(username, name, role, gender=None, dob=None, status="active", password="",
                  email=None, created_at=created):
@@ -403,7 +411,7 @@ def seed(conn):
                 continue
             base = rng.randint(2, 4)
             for back in range(29, -1, -1):
-                day = (NOW - timedelta(days=back)).replace(hour=8, minute=30)
+                day = (today - timedelta(days=back)).replace(hour=8, minute=30)
                 if back == 0 and i not in series and rng.random() < 0.25:
                     continue                      # some patients have not logged today yet
                 score = base + rng.choice([-1, 0, 1])
@@ -466,7 +474,6 @@ def pick_mhwp(conn, exclude_id=None):
     print(f"{'No':>3}  {'MHWP':<20}{'Patients':>8}")
     for i, r in enumerate(rows, 1):
         print(f"{i:>3}  {r['name']:<20}{r['n']:>8}")
-    set_menu([r["name"] for r in rows])
     n = ask_number("Choose an MHWP number, or 0 to cancel: ", 0, len(rows))
     return rows[n - 1] if n else None
 
@@ -481,7 +488,6 @@ def screen_allocations(conn):
         print(f"{'No':>3}  {'Patient':<18}{'Status':<10}{'MHWP'}")
         for i, r in enumerate(rows, 1):
             print(f"{i:>3}  {r['name']:<18}{r['account_status']:<10}{r['mname'] or 'none'}")
-        set_menu([r["name"] for r in rows])
         n = ask_number("Choose a patient number, or 0 to go back: ", 0, len(rows))
         if n == 0:
             return
@@ -575,7 +581,6 @@ def user_list(conn, role):
         print(f"{'No':>3}  {'Name':<18}{'Status':<10}{extra_label}")
         for i, r in enumerate(rows, 1):
             print(f"{i:>3}  {r['name']:<18}{r['account_status']:<10}{r['extra']}")
-        set_menu([r["name"] for r in rows])
         n = ask_number("Choose a user number, or 0 to go back: ", 0, len(rows))
         if n == 0:
             return
@@ -739,7 +744,8 @@ def age_at(dob):
     if not isinstance(dob, str) or not dob:       # None, or NaN from pandas when no date of birth is given
         return None
     y, m, d = map(int, dob.split("-"))
-    return NOW.year - y - ((NOW.month, NOW.day) < (m, d))
+    today = now()
+    return today.year - y - ((today.month, today.day) < (m, d))
 
 
 def patient_30day_averages(conn):
@@ -748,7 +754,7 @@ def patient_30day_averages(conn):
                         FROM mood_entries m JOIN users u ON u.user_id = m.patient_id
                         WHERE u.role='patient' AND u.account_status='active'
                           AND m.created_at > ? AND m.created_at <= ?""",
-               [ts(NOW - timedelta(days=30)), ts(NOW)])
+               [ts(now() - timedelta(days=30)), ts(now())])
     per = df.groupby("pid").agg(avg=("score", "mean"), entries=("score", "count"),
                                 gender=("gender", "first"), dob=("dob", "first"))
     per["age"] = per["dob"].map(age_at)
@@ -787,7 +793,7 @@ def alert_count(conn):
                         JOIN users u ON u.user_id=m.patient_id
                         WHERE u.account_status='active' AND m.created_at > ? AND m.created_at <= ?
                         ORDER BY m.patient_id, m.created_at""",
-               [ts(NOW - timedelta(days=7)), ts(NOW)])
+               [ts(now() - timedelta(days=7)), ts(now())])
     n = 0
     for _, g in df.groupby("pid"):
         s = g["score"].tolist()
@@ -808,7 +814,7 @@ def a8b_overview(conn):
                 .reindex(mh["user_id"], fill_value=0))
     today = conn.execute("""SELECT COUNT(DISTINCT patient_id) FROM mood_entries m JOIN users u ON u.user_id=m.patient_id
                             WHERE u.account_status='active' AND m.created_at >= ?""",
-                         (ts(NOW.replace(hour=0, minute=0)),)).fetchone()[0]
+                         (ts(now().replace(hour=0, minute=0)),)).fetchone()[0]
     # only bookings of active MHWPs, so the numerator matches the capacity below
     conf, req = conn.execute("""SELECT SUM(a.status='confirmed'), SUM(a.status='requested')
                                 FROM appointments a JOIN users m ON m.user_id = a.practitioner_id
@@ -832,61 +838,19 @@ def a8b_overview(conn):
 
 
 # ---------------------------------------------------------------- run
-DEMO_SCRIPT = [
-    # E1 login: one wrong try, then the right one (usernames ignore case)
-    "admin", "wrong", "ADMIN", "",                    # the team admin: username admin, blank password
-    # main menu: two bad inputs, then Manage allocations
-    "9", "x", "1",
-    "@Sam Doyle", "@Dr Chloe Tan", "maybe", "Y",       # A2 allocate: bad input, then capital Y
-    "@Lucy Fraser", "@Dr Ben Hughes", "N",             # A2 allocate: capital N, nothing changes
-    "@Daniel Cole",                                    # disabled patient refused
-    "@Noah Green", "@Dr Ben Hughes", "y",              # A2b reallocate, bookings, yes
-    "@Ella Brooks", "@Dr Amara Okafor", "n",           # A2b reallocate, bookings, no
-    "0",
-    # Manage users
-    "2",                                               # A1: the admin is protected and not listed
-    "2",                                               # patients
-    "@Lucy Fraser", "1", "2", "lucy.fraser", "lucy.fraser@example.org",       # A3 bad then good email
-    "@Lucy Fraser", "1", "4", "29/02/2026", "29/02/1992",                     # A3 29 Feb refused in 2026, accepted in leap year 1992
-    "@Hana Kim", "2", "maybe", "y",                    # A4 delete patient
-    "0",
-    "1",                                               # MHWPs
-    "@Dr Chloe Tan", "2", "n",                         # A4 delete MHWP, no
-    "@Dr Chloe Tan", "3", "y",                         # A5 disable MHWP
-    "0",
-    "2",                                               # patients
-    "@Omar Haddad", "3", "y",                          # A5 disable patient
-    "@Omar Haddad", "1",                               # A6 re enable
-    "0",
-    "0",
-    # allocations again, to see the re enabled patient has no MHWP
-    "1", "0",
-    # reports
-    "3", "1", "2",
-    "1", "@male", "", "0",                             # report 2: by gender, open male, Enter
-    "2", "@18 to 24", "", "0", "0",                    # by age band, open 18 to 24, Enter, back
-    "3", "4", "0",
-    # log out
-    "4",
-]
-
-
 def main():
-    global SCRIPT
-    demo = "--demo" in sys.argv
-    if demo:
-        SCRIPT = list(DEMO_SCRIPT)
-    # The demo runs in memory: always fresh, and no file is ever deleted. utf-8-sig also accepts a BOM.
-    conn = connect(":memory:" if demo else DB)
-    conn.executescript(Path(SCHEMA).read_text(encoding="utf-8-sig"))
+    conn = connect(DB)
+    conn.executescript(Path(SCHEMA).read_text(encoding="utf-8-sig"))   # utf-8-sig also accepts a BOM
     seed(conn)
-    while True:
-        admin = login(conn)
-        if admin is not None:
-            admin_menu(conn, admin)
-        if demo:
-            break
-    conn.close()
+    try:
+        while True:                               # after log out, back to the login screen
+            admin = login(conn)
+            if admin is not None:
+                admin_menu(conn, admin)
+    except (KeyboardInterrupt, EOFError):         # Ctrl+C, or the end of the input: quit without an error
+        print("\n  Goodbye.")
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

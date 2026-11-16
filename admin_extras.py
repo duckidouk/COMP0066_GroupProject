@@ -4,7 +4,7 @@
   week_group_menu   Report A8, after the tables: a 7-day text bar chart for one gender or age group.
 
 The core file calls these two functions. Everything else here is a helper for them.
-Shared helpers and settings (NOW, MIN_GROUP, ask, heading and so on) stay in the core file.
+Shared helpers and settings (now, MIN_GROUP, ask, heading and so on) stay in the core file.
 """
 from datetime import datetime, timedelta
 
@@ -15,7 +15,7 @@ TREND_STEP = 0.3       # a week trend smaller than this (in mood points) is "abo
 
 def mood_trend(conn, days=30):
     """Text bar chart of the average mood per day over the last `days` days."""
-    start = (core.NOW - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    start = (core.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     df = core.frame(conn, "SELECT date(created_at) AS day, score FROM mood_entries WHERE date(created_at) >= ?",
                (start,))
     core.heading(f"MOOD TREND: LAST {days} DAYS")
@@ -45,9 +45,10 @@ def week_group_days(conn, per):
     """Last 7 days for each gender and age band group, using the same patients as the tables above.
     Returns (days, groups). Each group is a dict: col, key, patients, daily {day: average or None}.
     A day is None when fewer than MIN_GROUP patients in the group logged a mood that day."""
-    days = [(core.NOW - timedelta(days=d)).strftime("%Y-%m-%d") for d in range(6, -1, -1)]
+    today = core.now()
+    days = [(today - timedelta(days=d)).strftime("%Y-%m-%d") for d in range(6, -1, -1)]
     df = core.frame(conn, """SELECT patient_id AS pid, date(created_at) AS day, score FROM mood_entries
-                        WHERE date(created_at) >= ? AND created_at <= ?""", [days[0], core.ts(core.NOW)])
+                        WHERE date(created_at) >= ? AND created_at <= ?""", [days[0], core.ts(today)])
     df = df[df["pid"].isin(per.index)].join(per[["gender", "band"]], on="pid")
     groups = []
     for col in ("gender", "band"):
@@ -101,7 +102,6 @@ def week_group_list(days, groups, title):
             print(f"{i:>3}  {g['key']:<20}{g['patients']:>8}{cells}")
         if hidden:
             print(f"\n  Hidden (fewer than {core.MIN_GROUP} patients): {', '.join(hidden)}")
-        core.set_menu([g["key"] for g in visible])
         n = core.ask_number("Choose a group to see day by day, or 0 to go back: ", 0, len(visible))
         if n == 0:
             return
