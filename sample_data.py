@@ -27,18 +27,6 @@ SAMPLE_PATIENT_CONDITIONS = [
     ("patient2", "Stress", "mhwp2"),
 ]
 
-SAMPLE_EMOTIONS = [
-    ("Calm", "Feeling peaceful and settled."),
-    ("Anxious", "Feeling worried or uneasy."),
-    ("Stressed", "Feeling under pressure."),
-    ("Hopeful", "Feeling optimistic about what is ahead."),
-]
-
-SAMPLE_RESOURCES = [
-    ("Free Mindfulness Project", "https://www.freemindfulness.org/download"),
-    ("Insight Timer Guided Meditations", "https://insighttimer.com/guided-meditations"),
-]
-
 SAMPLE_MOOD_ENTRIES = [
     ("patient1", 2, "Felt rested after a good night's sleep.", "2026-11-08T09:00:00"),
     ("patient1", 4, "A busy day left me feeling tense.", "2026-11-09T09:00:00"),
@@ -116,18 +104,6 @@ def seed_sample_data():
                 (user_ids[patient], condition_ids[condition], user_ids[practitioner])
                 for patient, condition, practitioner in SAMPLE_PATIENT_CONDITIONS
             ],
-        )
-
-        connection.executemany(
-            """
-            INSERT OR IGNORE INTO emotions (name, description)
-            VALUES (?, ?)
-            """,
-            SAMPLE_EMOTIONS,
-        )
-        connection.executemany(
-            "INSERT OR IGNORE INTO resources (name, url) VALUES (?, ?)",
-            SAMPLE_RESOURCES,
         )
 
         for username, score, comment, created_at in SAMPLE_MOOD_ENTRIES:
