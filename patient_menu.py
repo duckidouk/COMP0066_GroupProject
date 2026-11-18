@@ -2,6 +2,7 @@ import sqlite3
 from datetime import datetime
 from typing import Callable
 from utils import is_valid_email, is_valid_name
+from resource_search import patient_resources
 from patient_booking_appointment import appointment_menu
 
 def prompt_for_personal_detail(prompt: str) -> str | None:
@@ -166,7 +167,7 @@ def patient_menu(connection: sqlite3.Connection, user: sqlite3.Row) -> None:
             "2. Amend personal details\n"
             "3. Urgent support numbers\n"
             "4. Appointments\n"
-            "5. Meditation and relaxation resources (not yet integrated)\n"
+            "5. Meditation and relaxation resources\n"
             "6. Log out\n"
         )
         choice = input("Choose an option (1-6): ").strip()
@@ -181,7 +182,7 @@ def patient_menu(connection: sqlite3.Connection, user: sqlite3.Row) -> None:
             case "4":
                  appointment_menu(connection,patient_id)
             case "5":
-                print("This feature will be available when its module is integrated.")
+                patient_resources(connection)
             case "6":
                 print("You have been logged out.")
                 return
