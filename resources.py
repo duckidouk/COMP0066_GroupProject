@@ -16,8 +16,8 @@ emotions = [
     ("Stress", "Feeling under pressure, overwhelmed or unable to cope with demands such as work, study or life changes."),
     ("Anxiety", "Feeling worried, nervous, tense or afraid, sometimes with physical signs like a racing heart or restlessness."),
     ("Low mood and depression", "Feeling sad, down, lonely or hopeless, losing interest in things, including after a loss or bereavement."),
-    ("Sleep problems", "Difficulty falling asleep, staying asleep or waking up feeling rested. Insomnia."),
-    ("Tiredness/Low energy", "Feeling exhausted.")
+    ("Sleep problems", "Problems sleeping, getting to sleep or staying asleep. Insomnia."),
+    ("Tiredness/Low energy", "Feeling tired or exhausted(fatigue) most of the time, or tiring easily.")
 ]
 
 resources = [
