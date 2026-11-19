@@ -61,7 +61,7 @@ def main():
             print("This account is disabled; application features are unavailable.")
         elif user["role"] == "patient":
             ensure_daily_mood_entry(connection, user["user_id"])
-            patient_menu(connection, user)
+            patient_menu(connection, user["user_id"])
 
 
 if __name__ == "__main__":
