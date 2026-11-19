@@ -289,9 +289,12 @@ def get_upcoming_appointments(connection, patient_id):
     ).fetchall()
 
 def cancel_appointment(connection, appointment_id, patient_id):
-    """Cancel one of the patient's own appointments and write an email to the patient and the MHWP.
-    Returns True if it was cancelled, False if there was nothing to cancel."""
-    with connection:                                  # all or nothing
+    #Cancel one of the patient's own appointments and write an email to the patient and the MHWP.
+    #Returns True if it was cancelled, False if there was nothing to cancel
+    #THIS SECTION WOULD NEED TO BE COORDINATED WITH THE MHWP GROUP --> We need to make sure that the cancelled ones are shown as free slots.
+    # + Need to check that when a practioner makes a change to the status (i.e confirms it) it shows up correctly under Booking Summary
+    
+    with connection:                                  
         cursor = connection.execute(
             """
             UPDATE appointments SET status = 'cancelled'
