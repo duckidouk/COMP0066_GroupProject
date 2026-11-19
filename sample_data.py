@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime, time, timedelta
 
 DATABASE_PATH = "therapy_link.db"
 
@@ -47,10 +48,34 @@ SAMPLE_PATIENT_NOTES = [
 ]
 
 SAMPLE_APPOINTMENTS = [
-    ("patient1", "mhwp1", "2026-11-12T10:00:00", "confirmed"),
-    ("patient1", "mhwp1", "2026-11-13T14:00:00", "requested"),
-    ("patient2", "mhwp2", "2026-11-13T11:00:00", "confirmed"),
+    ("patient1", "mhwp1", "2026-11-12T10:00:00", "confirmed", "2026-11-10T11:00:00"),
+    ("patient1", "mhwp1", "2026-11-13T14:00:00", "requested", "2026-11-10T11:00:00"),
+    ("patient2", "mhwp2", "2026-11-13T11:00:00", "confirmed", "2026-11-10T11:00:00"),
 ]
+
+
+def upcoming_sample_appointments(now):
+    workdays = []
+    day = now.date()
+    while len(workdays) < 3:
+        day += timedelta(days=1)
+        if day.weekday() < 5:
+            workdays.append(day)
+
+    first, second, third = workdays
+    slots = [
+        ("patient1", "mhwp1", first, 10, "requested"),
+        ("patient2", "mhwp2", first, 11, "confirmed"),
+        ("patient1", "mhwp1", second, 14, "confirmed"),
+        ("patient2", "mhwp2", second, 9, "requested"),
+        ("patient1", "mhwp1", third, 11, "requested"),
+        ("patient2", "mhwp2", third, 15, "confirmed"),
+    ]
+    created_at = now.isoformat(timespec="seconds")
+    return [
+        (patient, practitioner, datetime.combine(day, time(hour)).isoformat(timespec="seconds"), status, created_at)
+        for patient, practitioner, day, hour, status in slots
+    ]
 
 
 def seed_sample_data():
@@ -162,13 +187,15 @@ def seed_sample_data():
                     (patient_id, practitioner_id, content, "2026-11-10T10:30:00"),
                 )
 
-        for patient, practitioner, scheduled_time, status in SAMPLE_APPOINTMENTS:
+        appointments = SAMPLE_APPOINTMENTS + upcoming_sample_appointments(datetime.now())
+        for patient, practitioner, scheduled_time, status, created_at in appointments:
             exists = connection.execute(
                 """
                 SELECT 1 FROM appointments
-                WHERE patient_id = ? AND practitioner_id = ? AND scheduled_time = ?
+                WHERE practitioner_id = ? AND datetime(scheduled_time) = datetime(?)
+                  AND (patient_id = ? OR status != 'cancelled')
                 """,
-                (user_ids[patient], user_ids[practitioner], scheduled_time),
+                (user_ids[practitioner], scheduled_time, user_ids[patient]),
             ).fetchone()
             if not exists:
                 connection.execute(
@@ -182,7 +209,7 @@ def seed_sample_data():
                         user_ids[practitioner],
                         scheduled_time,
                         status,
-                        "2026-11-10T11:00:00",
+                        created_at,
                     ),
                 )
 
