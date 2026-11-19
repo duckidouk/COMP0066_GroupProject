@@ -58,10 +58,23 @@ SAMPLE_PATIENT_NOTES = [
     ("patient2", "mhwp2", "Patient identified taking regular breaks as a helpful coping strategy."),
 ]
 
+# The first three are older history; the rest are upcoming (20 Nov - 4 Dec 2026).
+# "confirmed" = booked and accepted by the MHWP, "requested" = waiting for the MHWP.
 SAMPLE_APPOINTMENTS = [
     ("patient1", "mhwp1", "2026-11-12T10:00:00", "confirmed"),
     ("patient1", "mhwp1", "2026-11-13T14:00:00", "requested"),
     ("patient2", "mhwp2", "2026-11-13T11:00:00", "confirmed"),
+
+    ("patient1", "mhwp1", "2026-11-20T10:00:00", "confirmed"),
+    ("patient1", "mhwp1", "2026-11-24T14:00:00", "confirmed"),
+    ("patient1", "mhwp1", "2026-11-26T11:00:00", "requested"),
+    ("patient1", "mhwp1", "2026-12-01T09:00:00", "requested"),
+    ("patient1", "mhwp1", "2026-12-03T15:00:00", "requested"),
+
+    ("patient2", "mhwp2", "2026-11-20T14:00:00", "confirmed"),
+    ("patient2", "mhwp2", "2026-11-23T10:00:00", "confirmed"),
+    ("patient2", "mhwp2", "2026-11-27T16:00:00", "requested"),
+    ("patient2", "mhwp2", "2026-12-01T13:00:00", "requested"),
 ]
 
 
