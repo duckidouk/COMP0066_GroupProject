@@ -154,8 +154,7 @@ def show_urgent_support_numbers() -> None:
     input("\nPress Enter to return to the patient menu.")
 
 
-def patient_menu(connection: sqlite3.Connection, user: sqlite3.Row) -> None:
-    patient_id = user["user_id"]
+def patient_menu(connection,patient_id) -> None:
 
     while True:
         print(
@@ -187,3 +186,4 @@ def patient_menu(connection: sqlite3.Connection, user: sqlite3.Row) -> None:
                 return
             case _:
                 print("Please enter a number from 1 to 6.")
+
