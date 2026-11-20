@@ -45,6 +45,31 @@ conn.executescript("""
         content          TEXT NOT NULL, 
         created_at       TEXT NOT NULL 
     ); 
+
+    CREATE TABLE IF NOT EXISTS suicide_warning_alerts (
+        alert_id          INTEGER PRIMARY KEY,
+        patient_id        INTEGER NOT NULL
+            REFERENCES users(user_id) ON DELETE CASCADE,
+        mood_entry_id     INTEGER UNIQUE
+            REFERENCES mood_entries(mood_entry_id) ON DELETE CASCADE,
+        journal_entry_id  INTEGER UNIQUE
+            REFERENCES journal_entries(journal_entry_id) ON DELETE CASCADE,
+        recipient_type    TEXT NOT NULL
+            CHECK (recipient_type IN ('practitioner', 'admin_queue')),
+        recipient_practitioner_id INTEGER
+            REFERENCES users(user_id),
+        status            TEXT NOT NULL DEFAULT 'open'
+            CHECK (status IN ('open', 'resolved')),
+        created_at        TEXT NOT NULL,
+        CHECK (
+            (mood_entry_id IS NOT NULL AND journal_entry_id IS NULL) OR
+            (mood_entry_id IS NULL AND journal_entry_id IS NOT NULL)
+        ),
+        CHECK (
+            (recipient_type = 'practitioner' AND recipient_practitioner_id IS NOT NULL) OR
+            (recipient_type = 'admin_queue' AND recipient_practitioner_id IS NULL)
+        )
+    );
     
     CREATE TABLE IF NOT EXISTS appointments ( 
         appointment_id  INTEGER PRIMARY KEY, 

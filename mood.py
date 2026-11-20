@@ -1,6 +1,11 @@
 from datetime import date, datetime
 import sqlite3
 
+from suicide_warning import (
+    contains_suicide_warning_language,
+    create_suicide_warning_alert,
+)
+from patient_menu import show_urgent_support_numbers
 
 MOOD_SCORE_OPTIONS = {"1", "2", "3", "4", "5", "6"}
 MOOD_DESCRIPTORS = {
@@ -54,13 +59,20 @@ def ensure_daily_mood_entry(connection: sqlite3.Connection, patient_id: int) -> 
         print("\nPlease enter a comment with at least 3 characters.\n")
 
     created_at = datetime.now().isoformat(timespec="seconds")
-    connection.execute(
+    cursor = connection.execute(
         """
         INSERT INTO mood_entries (patient_id, score, comment, created_at)
         VALUES (?, ?, ?, ?)
         """,
         (patient_id, score, comment, created_at),
     )
+    warning_detected = contains_suicide_warning_language(comment)
+    if warning_detected:
+        create_suicide_warning_alert(
+            connection,
+            patient_id,
+            mood_entry_id=cursor.lastrowid,
+        )
     connection.commit()
     print(
         "\nYour mood entry has been saved.\n"
@@ -68,4 +80,8 @@ def ensure_daily_mood_entry(connection: sqlite3.Connection, patient_id: int) -> 
         f"Comment: {comment}\n"
         f"Recorded at: {datetime.fromisoformat(created_at).strftime('%Y-%m-%d %H:%M:%S')}\n"
     )
+    if warning_detected:
+        print("If you're struggling with your mental health or having thoughts of harming yourself, support is available now.")
+        show_urgent_support_numbers(wait_for_return=False)
+        
     input("Press Enter to continue to the main menu.")
