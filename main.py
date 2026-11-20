@@ -49,6 +49,7 @@ def login(connection):
 def main():
     with closing(sqlite3.connect(DATABASE_PATH)) as connection:
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
 
         user = login(connection)
 
