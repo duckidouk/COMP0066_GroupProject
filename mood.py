@@ -12,6 +12,11 @@ MOOD_DESCRIPTORS = {
     6: "Very low",
 }
 
+
+def is_valid_mood_comment(comment: str) -> bool:
+    return sum(character.isalpha() for character in comment) >= 3
+
+
 def ensure_daily_mood_entry(connection: sqlite3.Connection, patient_id: int) -> None:
     today = date.today().isoformat()
 
@@ -42,18 +47,25 @@ def ensure_daily_mood_entry(connection: sqlite3.Connection, patient_id: int) -> 
             break
         print("Please enter a number from 1 to 6.")
 
+    while True:
+        comment = input("Enter a brief comment about your mood: ").strip()
+        if is_valid_mood_comment(comment):
+            break
+        print("\nPlease enter a comment with at least 3 characters.\n")
+
     created_at = datetime.now().isoformat(timespec="seconds")
     connection.execute(
         """
-        INSERT INTO mood_entries (patient_id, score, created_at)
-        VALUES (?, ?, ?)
+        INSERT INTO mood_entries (patient_id, score, comment, created_at)
+        VALUES (?, ?, ?, ?)
         """,
-        (patient_id, score, created_at),
+        (patient_id, score, comment, created_at),
     )
     connection.commit()
     print(
         "\nYour mood entry has been saved.\n"
         f"\nMood score: {score} - {MOOD_DESCRIPTORS[score]}\n"
+        f"Comment: {comment}\n"
         f"Recorded at: {datetime.fromisoformat(created_at).strftime('%Y-%m-%d %H:%M:%S')}\n"
     )
     input("Press Enter to continue to the main menu.")
