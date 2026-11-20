@@ -6,6 +6,7 @@ Needs only core Python (sqlite3), plus Pandas for the reports.
 The schema is read from schema_stats.sql in the same folder.
 """
 import calendar
+from contextlib import contextmanager
 import os
 import random
 import re
@@ -89,7 +90,7 @@ def ask(prompt):
 def ask_number(prompt, lo, hi):
     while True:
         v = ask(prompt)
-        if v.isdigit() and lo <= int(v) <= hi:
+        if v.isdecimal() and lo <= int(v) <= hi:
             return int(v)
         print(f"  Please type a number from {lo} to {hi}.")
 
@@ -147,11 +148,44 @@ def parse_dob(v):
 
 
 # ---------------------------------------------------------------- database
-def connect(path=DB):
-    conn = sqlite3.connect(path)
+def connect(path=DB, timeout=5):
+    # isolation_level=None: Python does not start transactions by itself. transaction() below does it,
+    # so that the reads and the writes of one action are in the same transaction.
+    # timeout=5: if another connection is writing, wait up to 5 seconds before "database is locked".
+    conn = sqlite3.connect(path, isolation_level=None, timeout=timeout)
     conn.execute("PRAGMA foreign_keys = ON")      # off by default, so set it on every connection
     conn.row_factory = sqlite3.Row
     return conn
+
+
+@contextmanager
+def transaction(conn):
+    """One unit: every read and write inside the with block happens together, or not at all.
+    BEGIN IMMEDIATE locks the database for writing before the first read, so no other connection
+    can change the data between our checks and our changes. Any error undoes everything (ROLLBACK).
+
+    Rules:
+      * Never ask for input inside the with block. The lock stays on while the admin reads a prompt,
+        and every other writer must wait. Ask first, then open the transaction and check again inside.
+      * If a transaction is already open (one action inside another), this one joins it. The outer
+        transaction then commits or rolls back everything, because SQLite cannot start a second one."""
+    if conn.in_transaction:                       # already inside a transaction: join it
+        yield
+        return
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except BaseException:                         # BaseException also covers Ctrl+C in the middle
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
+
+
+def problem_text(e):
+    """The message for an action that was refused or failed."""
+    if isinstance(e, sqlite3.OperationalError) and "locked" in str(e):
+        return "The database is busy, try again."
+    return str(e)
 
 
 def get_user(conn, uid):
@@ -223,7 +257,7 @@ def guard_admin(u):
 
 
 def allocate(conn, patient_id, mhwp_id):
-    with conn:
+    with transaction(conn):
         require_active(conn, patient_id, "patient")
         require_active(conn, mhwp_id, "practitioner")
         cur = conn.execute("UPDATE patient_profiles SET assigned_practitioner_id=? WHERE patient_id=?",
@@ -233,7 +267,7 @@ def allocate(conn, patient_id, mhwp_id):
 
 
 def reallocate(conn, patient_id, new_mhwp_id):
-    with conn:                                    # one transaction: all or nothing
+    with transaction(conn):                       # one unit: all or nothing
         require_active(conn, patient_id, "patient")
         require_active(conn, new_mhwp_id, "practitioner")
         row = conn.execute("SELECT assigned_practitioner_id FROM patient_profiles WHERE patient_id=?",
@@ -251,7 +285,7 @@ def reallocate(conn, patient_id, new_mhwp_id):
 def update_field(conn, uid, col, value):
     if col not in {"name", "email", "gender", "date_of_birth"}:
         raise ValueError(col)
-    with conn:
+    with transaction(conn):
         u = require_user(conn, uid)
         guard_admin(u)
         if u["account_status"] == "disabled":
@@ -260,7 +294,7 @@ def update_field(conn, uid, col, value):
 
 
 def delete_user(conn, uid):
-    with conn:
+    with transaction(conn):
         u = require_user(conn, uid)
         guard_admin(u)
         rows = live_rows(conn, user_id=uid)
@@ -270,7 +304,7 @@ def delete_user(conn, uid):
 
 
 def disable_user(conn, uid):
-    with conn:
+    with transaction(conn):
         u = require_user(conn, uid)
         guard_admin(u)
         if u["account_status"] == "disabled":
@@ -288,7 +322,7 @@ def disable_user(conn, uid):
 
 
 def reenable_user(conn, uid):
-    with conn:
+    with transaction(conn):
         u = require_user(conn, uid)
         if u["account_status"] != "disabled":
             raise Refused("This user is not disabled.")
@@ -324,7 +358,7 @@ def seed(conn):
              "2026-10-20 09:00" if status == "disabled" else None, gender, dob))
         return cur.lastrowid
 
-    with conn:
+    with transaction(conn):
         # ---- part 1: the team's sample data
         uid = {}
         for username, password, name, email, role, created_at in team.SAMPLE_USERS:
@@ -500,7 +534,7 @@ def screen_allocations(conn):
             else:
                 a2b_reallocate(conn, p)
         except (Refused, sqlite3.Error) as e:
-            print(f"\n  Nothing was changed. {e}")
+            print(f"\n  Nothing was changed. {problem_text(e)}")
 
 
 def a2_allocate(conn, p):
@@ -589,7 +623,7 @@ def user_list(conn, role):
             guard_admin(u)                         # A1: never true here, kept as a safety net
             user_actions(conn, u["user_id"])
         except (Refused, sqlite3.Error) as e:
-            print(f"\n  Nothing was changed. {e}")
+            print(f"\n  Nothing was changed. {problem_text(e)}")
 
 
 def user_actions(conn, uid):
@@ -601,7 +635,10 @@ def user_actions(conn, uid):
         {0: lambda: None, 1: lambda: a3_edit(conn, uid), 2: lambda: a4_delete(conn, uid),
          3: lambda: a5_disable(conn, uid)}[c]()
     else:
-        print(f"  This account has been disabled since {show(u['disabled_at'])} and is frozen.")
+        if u["disabled_at"]:
+            print(f"  This account has been disabled since {show(u['disabled_at'])} and is frozen.")
+        else:
+            print("  This account has been disabled and frozen.")
         print("   1  Re enable user\n   2  Delete user\n   0  Back")
         c = ask_number("Choose an action: ", 0, 2)
         {0: lambda: None, 1: lambda: a6_reenable(conn, uid), 2: lambda: a4_delete(conn, uid)}[c]()
@@ -840,15 +877,17 @@ def a8b_overview(conn):
 # ---------------------------------------------------------------- run
 def main():
     conn = connect(DB)
-    conn.executescript(Path(SCHEMA).read_text(encoding="utf-8-sig"))   # utf-8-sig also accepts a BOM
-    seed(conn)
     try:
+        conn.executescript(Path(SCHEMA).read_text(encoding="utf-8-sig"))   # utf-8-sig also accepts a BOM
+        seed(conn)
         while True:                               # after log out, back to the login screen
             admin = login(conn)
             if admin is not None:
                 admin_menu(conn, admin)
     except (KeyboardInterrupt, EOFError):         # Ctrl+C, or the end of the input: quit without an error
         print("\n  Goodbye.")
+    except sqlite3.OperationalError as e:         # for example a busy database outside an action screen
+        print(f"\n  {problem_text(e)}")
     finally:
         conn.close()
 
