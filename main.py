@@ -4,6 +4,7 @@ from contextlib import closing
 
 from mood import ensure_daily_mood_entry
 from patient_menu import patient_menu
+from admin_menu import admin_menu # adding new line to refer to the admin menu function
 
 DATABASE_PATH = "therapy_link.db"
 
@@ -48,6 +49,7 @@ def login(connection):
 def main():
     with closing(sqlite3.connect(DATABASE_PATH)) as connection:
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
 
         user = login(connection)
 
@@ -62,6 +64,9 @@ def main():
         elif user["role"] == "patient":
             ensure_daily_mood_entry(connection, user["user_id"])
             patient_menu(connection, user["user_id"])
+
+        elif user["role"] == "admin":     # adding new line to refer to admin menu function
+            admin_menu(connection, user["user_id"])
 
 
 if __name__ == "__main__":
