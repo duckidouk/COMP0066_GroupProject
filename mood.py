@@ -1,6 +1,11 @@
 from datetime import date, datetime
 import sqlite3
 
+from suicide_warning import (
+    contains_suicide_warning_language,
+    create_suicide_warning_alert,
+)
+from patient_menu import show_urgent_support_numbers
 
 MOOD_SCORE_OPTIONS = {"1", "2", "3", "4", "5", "6"}
 MOOD_DESCRIPTORS = {
@@ -11,6 +16,11 @@ MOOD_DESCRIPTORS = {
     5: "Low",
     6: "Very low",
 }
+
+
+def is_valid_mood_comment(comment: str) -> bool:
+    return sum(character.isalpha() for character in comment) >= 3
+
 
 def ensure_daily_mood_entry(connection: sqlite3.Connection, patient_id: int) -> None:
     today = date.today().isoformat()
@@ -42,18 +52,36 @@ def ensure_daily_mood_entry(connection: sqlite3.Connection, patient_id: int) -> 
             break
         print("Please enter a number from 1 to 6.")
 
+    while True:
+        comment = input("Enter a brief comment about your mood: ").strip()
+        if is_valid_mood_comment(comment):
+            break
+        print("\nPlease enter a comment with at least 3 characters.\n")
+
     created_at = datetime.now().isoformat(timespec="seconds")
-    connection.execute(
+    cursor = connection.execute(
         """
-        INSERT INTO mood_entries (patient_id, score, created_at)
-        VALUES (?, ?, ?)
+        INSERT INTO mood_entries (patient_id, score, comment, created_at)
+        VALUES (?, ?, ?, ?)
         """,
-        (patient_id, score, created_at),
+        (patient_id, score, comment, created_at),
     )
+    warning_detected = contains_suicide_warning_language(comment)
+    if warning_detected:
+        create_suicide_warning_alert(
+            connection,
+            patient_id,
+            mood_entry_id=cursor.lastrowid,
+        )
     connection.commit()
     print(
         "\nYour mood entry has been saved.\n"
         f"\nMood score: {score} - {MOOD_DESCRIPTORS[score]}\n"
+        f"Comment: {comment}\n"
         f"Recorded at: {datetime.fromisoformat(created_at).strftime('%Y-%m-%d %H:%M:%S')}\n"
     )
+    if warning_detected:
+        print("If you're struggling with your mental health or having thoughts of harming yourself, support is available now.")
+        show_urgent_support_numbers(wait_for_return=False)
+        
     input("Press Enter to continue to the main menu.")
