@@ -2,7 +2,13 @@ import sqlite3
 from datetime import datetime
 from typing import Callable
 from utils import is_valid_email, is_valid_name
+from resource_search import patient_resources
 from patient_booking_appointment import appointment_menu
+from suicide_warning import (
+    contains_suicide_warning_language,
+    create_suicide_warning_alert,
+)
+from patient_view_emails import email_list
 
 def prompt_for_personal_detail(prompt: str) -> str | None:
     value = input(f"{prompt}: ").strip()
@@ -42,13 +48,20 @@ def log_journal_entry(connection: sqlite3.Connection, patient_id: int) -> None:
             continue
 
         created_at = datetime.now().isoformat(timespec="seconds")
-        connection.execute(
+        cursor = connection.execute(
             """
             INSERT INTO journal_entries (patient_id, content, created_at)
             VALUES (?, ?, ?)
             """,
             (patient_id, content, created_at),
         )
+        warning_detected = contains_suicide_warning_language(content)
+        if warning_detected:
+            create_suicide_warning_alert(
+                connection,
+                patient_id,
+                journal_entry_id=cursor.lastrowid,
+            )
         connection.commit()
         formatted_timestamp = datetime.fromisoformat(created_at).strftime(
             "%Y-%m-%d %H:%M:%S"
@@ -56,8 +69,12 @@ def log_journal_entry(connection: sqlite3.Connection, patient_id: int) -> None:
         print(
             "\nYour journal entry has been saved.\n"
             f'"{content}"\n'
-            f"Recorded at: {formatted_timestamp}"
+            f"Recorded at: {formatted_timestamp}\n"
         )
+        if warning_detected:
+            print("If you're struggling with your mental health or having thoughts of harming yourself, support is available now.")
+            show_urgent_support_numbers(wait_for_return=False)
+            
         input("\nPress Enter to return to the patient menu.")
         return
 
@@ -142,16 +159,17 @@ def edit_personal_details(connection: sqlite3.Connection, patient_id: int) -> No
         print("Your details have been updated.")
 
 
-def show_urgent_support_numbers() -> None:
+def show_urgent_support_numbers(wait_for_return: bool = True) -> None:
     print(
         "\nUrgent mental health support (England)\n\n"
         "NHS 111: Call 111 and select the mental health option for urgent advice.\n"
         "999 or A&E: Call 999 or go to A&E if someone's life is at risk or "
         "you cannot keep yourself or someone else safe.\n"
         "Samaritans: Call 116 123 for free, confidential listening support.\n"
-        "Childline (under 19): Call 0800 1111."
+        "Childline (under 19): Call 0800 1111.\n"
     )
-    input("\nPress Enter to return to the patient menu.")
+    if wait_for_return:
+        input("\nPress Enter to return to the patient menu.")
 
 
 def patient_menu(connection,patient_id) -> None:
@@ -165,10 +183,11 @@ def patient_menu(connection,patient_id) -> None:
             "2. Amend personal details\n"
             "3. Urgent support numbers\n"
             "4. Appointments\n"
-            "5. Meditation and relaxation resources (not yet integrated)\n"
-            "6. Log out\n"
+            "5. Meditation and relaxation resources\n"
+            "6. View Notifications\n"
+            "7. Log out\n"
         )
-        choice = input("Choose an option (1-6): ").strip()
+        choice = input("Choose an option (1-7): ").strip()
 
         match choice:
             case "1":
@@ -180,10 +199,12 @@ def patient_menu(connection,patient_id) -> None:
             case "4":
                  appointment_menu(connection,patient_id)
             case "5":
-                print("This feature will be available when its module is integrated.")
+                patient_resources(connection)
             case "6":
+                email_list(connection,patient_id)
+            case "7":
                 print("You have been logged out.")
                 return
             case _:
-                print("Please enter a number from 1 to 6.")
+                print("Please enter a number from 1 to 7.")
 

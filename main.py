@@ -2,6 +2,7 @@ import getpass
 import sqlite3
 from contextlib import closing
 
+from mhwp_menu import mhwp_menu
 from mood import ensure_daily_mood_entry
 from patient_menu import patient_menu
 
@@ -48,6 +49,7 @@ def login(connection):
 def main():
     with closing(sqlite3.connect(DATABASE_PATH)) as connection:
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
 
         user = login(connection)
 
@@ -62,6 +64,8 @@ def main():
         elif user["role"] == "patient":
             ensure_daily_mood_entry(connection, user["user_id"])
             patient_menu(connection, user["user_id"])
+        elif user["role"] == "practitioner":
+            mhwp_menu(connection, user)
 
 
 if __name__ == "__main__":
