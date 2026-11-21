@@ -24,7 +24,7 @@ def email_list(connection,patient_id):
         return None
 
     else:
-        print(f"\nEmail notifications delivered to:",email_id['to_address'],'\n')
+        print(f"\nEmail notifications delivered to:",email_id,'\n')
 
         for number,rows in enumerate(emails,start=1):
             sent = (datetime.datetime.fromisoformat(rows['sent_at']))

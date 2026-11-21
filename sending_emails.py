@@ -11,7 +11,7 @@ from email.message import EmailMessage
 
 
 #CONFIG TO SET UP THE EMAIL DELIVERY
-#TEST_TO_ADDRESS = "salonipatni1206@gmail.com" ---> This will need to be changed if you want to test it locally to your own personal email
+TEST_TO_ADDRESS = "salonipatni1206@gmail.com" #---> This will need to be changed if you want to test it locally to your own personal email
 FROM_ADDRESS = "therapylink0066@gmail.com" 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
@@ -29,7 +29,7 @@ def send_real_email(to_address, subject, body):
 
     message = EmailMessage()
     message["From"] = FROM_ADDRESS
-    message["To"] =  to_address #TEST_TO_ADDRESS if you are testing this locally on your side
+    message["To"] =  TEST_TO_ADDRESS or to_address #TEST_TO_ADDRESS if you are testing this locally on your side
     message["Subject"] = subject
     message.set_content(body)
 
@@ -46,7 +46,7 @@ def send_real_email(to_address, subject, body):
 
 def update_email_table(connection, to_user_id, subject, body):
     row = connection.execute(
-        "SELECT email FROM users WHERE user_id = ?", (to_user_id,)
+        "SELECT name,email FROM users WHERE user_id = ?", (to_user_id,)
     ).fetchone()
     address, name = row["email"], row["name"]
     sent_at = datetime.datetime.now().isoformat(timespec="seconds")

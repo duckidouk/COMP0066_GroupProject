@@ -7,6 +7,7 @@ from mood import ensure_daily_mood_entry
 from patient_menu import patient_menu
 
 DATABASE_PATH = "therapy_link.db"
+#REMEMBER TO ENTER THE SMTP TOKEN TO ENSURE THAT YOU CAN SEND THE EMAIL TO THE PATIENT AND RECEIPIENT
 
 
 def login(connection):
