@@ -7,8 +7,11 @@ import datetime
 from contextlib import closing
 import calendar
 DATABASE_PATH = "therapy_link.db"
+from sending_emails import send_out_email
 
 #----------------- Appointment Menu ---------------------------------------------
+#THIS IS THE VIEW THE PATIENT WILL SEE WHEN THEY PRESS 4 ON THE MAIN MENU
+#OPTIONS ARE TO VIEW THE CALENDAR AND BOOK AN APPOINTMENT, VIEW APPOINTMENTS AND MAKE CANCELLATIONS, OR RETURN TO MAIN MENU
 
 def appointment_menu(connection,patient_id):
     while True:
@@ -31,7 +34,7 @@ def appointment_menu(connection,patient_id):
             case "2":
                 booking_summary_flow(connection,patient_id)
             case "3":
-                #patient_menu(connection,patient_id)
+                #GOES BACK TO patient_menu
                 return            
             case _:
                 print("Please enter a number from 1 to 3.")
@@ -39,36 +42,36 @@ def appointment_menu(connection,patient_id):
 
 
 #----------------- User Input Functions ------------------------------------------------
-
+#LISITNG HERE ALL THE INPUTS WE COULD POSSIBLY NEED FROM THE USER (E.G. DATES FOR CALENDAR SEARCHES)
 max_number_of_days = 14 #Users can only look into booking appointments 2 weeks in advance
 working_hours = range(9,17)
-now = datetime.datetime.now().isoformat(timespec="seconds")
 
-#Make the dates look pretty
+#MAKE THE DATE FORMAT LOOK PRETTY (CAN BE USED BY ANY TEAM)
 def pretty_format(day):
     return day.strftime("%a %d/%m/%y")
 
-#Ask the user for the date (to be used in asking for a range --> this has rules to make sure its a valid date)
+#ASK THE USER FOR A DATE (MADE A FUNCTION TO REDUCE REPETITION WHEN ASKING FOR A DATE RANGE. ALSO CHECKS THE FORMAT OF THE DATE)
+#CHECKS: WHETHER ITS A DIGIT, ONLY 2 VALUES (MONTH AND DAY), VALID DATE, IF ITS LESS THAN TODAYS DATE 
 def ask_user_for_date(prompt):
     today_date = datetime.date.today()
     while True:
         result = input(prompt).strip()
         if result.lower() in ('b','back'):
             return None
-        elif result == "":
-            return input("Enter a date (DD/MM) or B to go back:")
-            continue
 
-        split_date = result.split("/")
-        #print(splited_date)
+        split_date = result.split("/") #CHECK THAT IT'S DIGIT AND ONLY 2 VALUES HAVE BEEN PROVIDED
+        #print(split_date)
         if len(split_date) != 2 or not all(split_date[i].isdigit() for i in range(len(split_date))):
-            print("Please enter a valid date as DD/MM - e.g. 11/18\n")
+            print("Please enter a valid date as DD/MM - e.g. 11/12\n")
             continue
 
-        day,month = int(split_date[0]),int(split_date[1])
-        year = today_date.year
+        day,month = int(split_date[0]),int(split_date[1]) 
 
         try:
+            if month < today_date.month:
+                year = today_date.year + 1 #DEFAULT YEAR = CURRENT YEAR BUT IF THE MONTH IS LESS THAN CURRENT MONTH THEN IT'S FOR NEXT YEAR
+            else: 
+                year = today_date.year
             chosen_date = datetime.date(year,month,day)
             #print(chosen_date)
         except ValueError:
@@ -81,16 +84,19 @@ def ask_user_for_date(prompt):
     
         return chosen_date
 
-#Selecting a date range in the appointment booking section
+#SELECTING A DATE RANGE TO ADD AS INPUT FOR VIEWING THE CALENDAR
+#THE USER SHOULD ONLY ADD A RANGE BETWEEN NOW AND 2 WEEKS FROM NOW -- BECAUSE THEY CAN ONLY BOOK APPOINTMENTS WITHIN 2 WEEKS (THERES NO POINT IN LOOKING UP DATES BEYOND THAT)
 def ask_user_for_date_range():
     today_date = datetime.date.today()
-    print("\nYou may check availabilty between a date range. Please note that you can only book 14 days in advance\n")
+    max_date = today_date+datetime.timedelta(max_number_of_days)
+
     while True:
-        start_date = ask_user_for_date("Enter the start date in DD/MM format or press 'B' to go back to Appointment Menu\n")
-        if start_date == 'B':
-            return appointment_menu
-        elif start_date is None: 
+        start_date = ask_user_for_date("Enter the start date in DD/MM format or enter 'b' to go back to Appointment Menu\n")
+        if start_date is None: 
             return None
+        elif start_date > max_date:
+            print(f"Appointments can only be booked up to {max_number_of_days} days ahead. Kindly enter a valid date")   
+            return None 
        
         end_date = ask_user_for_date("Enter the end date in DD/MM format\n")
         if end_date is None: 
@@ -99,14 +105,15 @@ def ask_user_for_date_range():
         if end_date < start_date:
             print("Your end date cannot be earlier than your start date")
         elif end_date > today_date + datetime.timedelta(max_number_of_days):
-            print(f"Appointments can only be booked up to {max_number_of_days} days ahead,"+str(today_date+datetime.timedelta(max_number_of_days)))
+            print(f"Appointments can only be booked up to {max_number_of_days} days ahead,"+pretty_format(max_date))
         else:
-            print("Searching for slots between: ",pretty_format(start_date),"--",pretty_format(end_date),'\n')
+            print("\nSearching for slots between: ",pretty_format(start_date),"--",pretty_format(end_date),'\n')
             return start_date,end_date
 
+#ALLOW THE USER TO SELECT A SLOT TO BOOK 
 def choose_slot(slots):
     while True:
-        chosen = (input("Which slot would you like to book?\n")).strip()
+        chosen = (input("\nWhich slot would you like to book? Enter 'b' to return to Appointment Menu\n")).strip()
         if chosen.lower() in ('b','back'):
             return None
         if chosen.isdigit() and int(chosen) in slots:
@@ -114,6 +121,7 @@ def choose_slot(slots):
         else:
             print(f"Please enter a number between 1 and {len(slots)}.")
 
+#ASK USER CONFIRMATION (THIS FUNCTION TO BE USED BY THE TEAM) --> ONLY FOR YES OR NO QUESTIONS
 def user_confirmation(question_asked):
     while True:
         answer = input(f"{question_asked}: (y/n)\n").strip().lower()
@@ -125,8 +133,9 @@ def user_confirmation(question_asked):
             print('Please answer y or n')
 
 #----------------- Appointment Booking ---------------------------------------------
+#THIS SECTION REFERS TO APPOINTMENT BOOKING (WHEN THE USER PRESSES 1 ON THE APPOINTMENT MENU)
 
-#Get the assigned practioner's id to check their calendar
+#GET THE PRACTITIONERS ID 
 def get_practitioner_id(connection, patient_id):
     practitioner_id = connection.execute(
         """
@@ -139,21 +148,58 @@ def get_practitioner_id(connection, patient_id):
 
     return practitioner_id["assigned_practitioner_id"] if practitioner_id else None
 
-#Get the name of the practioner to show when they press to book the appointment
+#GET THE PRACTITIONERS NAME --> TO SHOW IN SOME OF THE NOTIFICATIONS
 def get_practitioner_name(connection, practitioner_id):
     result = connection.execute(
         "SELECT name FROM users WHERE user_id = ?", (practitioner_id,)
     ).fetchone()
     return result["name"] if result else "Not Available"
 
+#USING CALENDAR LIBRARY TO SHOW THE CALENDAR IN A NICE FORMAT. SHOWS ONLY MONDAY TO FRIDAY (BLANKED OUT SAT AND SUNDAY)
+def show_month(connection, practitioner_id, patient_id, year, month, first_day, last_day):
+    month_start = datetime.date(year, month, 1)
+    month_end = month_start + datetime.timedelta(calendar.monthrange(year, month)[1])
+    rows = connection.execute(
+        """
+        SELECT scheduled_time, patient_id FROM appointments
+        WHERE practitioner_id = ? AND scheduled_time >= ? AND scheduled_time < ?
+        AND status != 'cancelled'
+        """,
+        (practitioner_id, month_start.isoformat(), month_end.isoformat()),
+    ).fetchall()
+    busy_days, my_days = set(), set() #USING A SET HERE SO WE DONT GET ANY DUPLICATES IN THE DAYS/TIMINGS
+    for row in rows:
+        day = datetime.datetime.fromisoformat(row["scheduled_time"]).day
+        busy_days.add(day)
+        if row["patient_id"] == patient_id:
+            my_days.add(day)
 
-#Display available appointment slots for a practitioner    
-def display_available_slots(connection,patient_id,practitioner_name, practitioner_id, startdate,enddate):
-    #Get all appointments for the practitioner between 2 given dates
+    print(f"{calendar.month_name[month]} {year}".center(27))
+    print("Mo  Tu  We  Th  Fr  Sa  Su")
+    for week in calendar.monthcalendar(year, month):      
+        line = ""
+        week[-2] = 0 #Saturday = empty --> PRACTIONERS DONT WORK ON WEEKENDS
+        week[-1] = 0 #Sunday = empty
+        
+        for day in week:
+            #print(day)
+            if day == 0:
+                line += "    "
+            elif not (first_day <= datetime.date(year, month, day) <= last_day):
+                line += " .  "                            
+            else:
+                mark = "+" if day in my_days else ("*" if day in busy_days else " ")
+                line += f"{day:>2}{mark} "
+        print(line)
+    print("* = has bookings   + = includes your booking   . = not in your range") #PRINTING THE KEY FOR THE USER TO UNDERSTAND
+
+#ABOVE WAS TO SHOW THE CALENDAR (ONLY FOR AESTHETICS AND TO SHOW A CALENDAR)
+#THE ACTUAL BOOKING OF APPOINTMENTS IS DONE USING THE DISPLAY_AVAILABLE_SLOTS FUNCTION
+  
+def display_available_slots(connection,patient_id, practitioner_id, startdate,enddate):
+    #GET ALL APPOINTMENTS BETWEEN THE TWO DATES THAT WERE INSERTED BY THE USER 
     #Example time in schema= 2026-11-13T11:00:00
     #SQL converts datetime into 2026-11-13<space>11:00:00 --> so all need to be converted using the isoformat to ensure that the time comparison can happen!!!
-
-    print("\nShowing you Calendar for:",practitioner_name,'\n')
 
     start_of_day = datetime.datetime.combine(startdate, datetime.time(9,0)).isoformat(timespec="seconds") 
     end_of_day = datetime.datetime.combine(enddate, datetime.time(17,0)).isoformat(timespec="seconds")
@@ -168,7 +214,6 @@ def display_available_slots(connection,patient_id,practitioner_name, practitione
                 (practitioner_id, start_of_day, end_of_day),
             ).fetchall()
     
-
     #Get a list of all the booked timings (from the SQL)
     booked_times = {}
     for i in appointments:
@@ -196,7 +241,7 @@ def display_available_slots(connection,patient_id,practitioner_name, practitione
         day += datetime.timedelta(1)
     return free_slots
 
-#Function to make the appointment (INSERT into the appointment table on SQL)
+#USER SELECTS A SLOT --> APPOINTMENT IS MADE BY INSERTING THE APPOINTMENT INTO THE APPOINTMENTS TABLE IN SQL
 def make_appointment(connection,patient_id,practioner_id,selected_appointment_time,practioner_name):
 
     try: 
@@ -227,18 +272,21 @@ def make_appointment(connection,patient_id,practioner_id,selected_appointment_ti
     return booking.lastrowid
 
 #----------------- The flow of the Appointment booking process ---------------------------------------------
-
+#PUTTING TOGETHER ALL THE FUNCTIONS FOR THE APPOINTMENT BOOKING PROCESS (WHEN THE USER PRESSES 1)
 '''
-Patient selects to view the calendar/make an appointment from the menu page
+Appointment Booking Flow:
+Patient selects to view the calendar/make an appointment from the menu page (press 1)
 --> Patient views the calendar
 --> Prompted if they would like to make a booking?
---> Patient enters the dates they want to view  
----> Booking made
---> Confirmation
+--> Patient enters the dates they want to view (the index/the number associated to the date and time of appointment)
+--> Booking made
+--> Patient told that the booking has been REQUESTED (confirmation will be sent by the practitioner)
 --> Back to the menu page
 '''
 
 def booking_flow(connection,patient_id):
+
+    today_date = datetime.date.today()
 
     practitioner_id = get_practitioner_id(connection,patient_id)
     #print(practitioner_id)
@@ -249,6 +297,9 @@ def booking_flow(connection,patient_id):
     practitioner_name = get_practitioner_name(connection, practitioner_id)
     #print(practitioner_name)
 
+    default_last_date = today_date + datetime.timedelta(max_number_of_days)
+    print(f"\nPlease note that you can only book {max_number_of_days} days in advance. You may check availabilty between",pretty_format(today_date),"and ",pretty_format(default_last_date),".\n")
+
     while True: 
         date_range = ask_user_for_date_range()
         #print(date_range)
@@ -258,8 +309,19 @@ def booking_flow(connection,patient_id):
         start_date,end_date = date_range
         #print(start_date)
         #print(end_date)
+
+        #print("Showing you Calendar for:",practitioner_name,'\n')
+
+        if start_date.month == end_date.month:
+            (show_month(connection,practitioner_id,patient_id,start_date.year,start_date.month,start_date,end_date))
+        else: 
+            (show_month(connection,practitioner_id,patient_id,start_date.year,start_date.month,start_date,end_date))
+            (show_month(connection,practitioner_id,patient_id,end_date.year,end_date.month,start_date,end_date))
+
+        #display = show_month(connection,practitioner_id,patient_id,2026,12,start_date,end_date)
+        #print(display)
         
-        slots = display_available_slots(connection,patient_id,practitioner_name,practitioner_id,start_date,end_date)
+        slots = display_available_slots(connection,patient_id,practitioner_id,start_date,end_date)
         if not slots: 
             return None
         
@@ -276,101 +338,100 @@ def booking_flow(connection,patient_id):
             return appointment_id
 
 #----------------- Booking Summary and Cancellation ---------------------------------------------
+#THIS SECTION IS FOR VIEWING THE APPOINTMENTS (WHEN THE PATIENT PRESSES 2 ON THE APPOINTMENT MENU)
 
 def get_upcoming_appointments(connection, patient_id):
-    """The patient's future appointments that are not cancelled, earliest first, as a list of Rows."""
     return connection.execute(
         """
         SELECT appointment_id, practitioner_id, scheduled_time, status FROM appointments
-        WHERE patient_id = ? AND status != 'cancelled' AND scheduled_time >= ?
+        WHERE patient_id = ? AND scheduled_time >= ?
         ORDER BY scheduled_time
         """,
         (patient_id, datetime.datetime.now().isoformat(timespec="seconds")),
     ).fetchall()
 
+def print_bookings(connection, title, rows, index=None):
+    print(f"\n{title}:")
+    if not rows:
+        print("  None")
+    for row in rows:
+        when = datetime.datetime.fromisoformat(row["scheduled_time"])
+        name = get_practitioner_name(connection, row["practitioner_id"])
+        if index is None: #for those cancelled there should be no number so it doesn't affect when trying to cancel                                  
+            print(f"     {when:%a %d %B at %H:%M}  with {name}")
+        else:
+            number = len(index) + 1                        
+            index[number] = row["appointment_id"]
+            print(f"  {number}. {when:%a %d %B at %H:%M}  with {name}")
+
+
 def cancel_appointment(connection, appointment_id, patient_id):
-    #Cancel one of the patient's own appointments and write an email to the patient and the MHWP.
-    #Returns True if it was cancelled, False if there was nothing to cancel
-    #THIS SECTION WOULD NEED TO BE COORDINATED WITH THE MHWP GROUP --> We need to make sure that the cancelled ones are shown as free slots.
-    # + Need to check that when a practioner makes a change to the status (i.e confirms it) it shows up correctly under Booking Summary
+#THE PATIENT CAN CANCEL THEIR APPOINTMENT >>> THIS TRIGGERS AN EMAIL TO BE SENT TO THE PATIENT AND THE PRACTITIONER
+#THIS SECTION WOULD NEED TO BE COORDINATED WITH THE MHWP GROUP --> We need to make sure that the cancelled ones are shown as free slots.
+# + Need to check that when a practioner makes a change to the status (i.e confirms it) it shows up correctly under Booking Summary
     
     with connection:                                  
-        cursor = connection.execute(
+        cancelled = connection.execute(
             """
             UPDATE appointments SET status = 'cancelled'
             WHERE appointment_id = ? AND patient_id = ? AND status != 'cancelled'
             """,
             (appointment_id, patient_id),
         )
-        if cursor.rowcount == 0:
+        if cancelled.rowcount == 0: #Returns True if it was cancelled, False if there was nothing to cancel
             return False
-        appointment = connection.execute(
-            "SELECT practitioner_id, scheduled_time FROM appointments WHERE appointment_id = ?",
-            (appointment_id,),
-        ).fetchone()
-        when = datetime.datetime.fromisoformat(appointment["scheduled_time"])
-        sent_at = datetime.datetime.now().isoformat(timespec="seconds")
-        for user_id in (patient_id, appointment["practitioner_id"]):
-            user = connection.execute(
-                "SELECT email FROM users WHERE user_id = ?", (user_id,)
-            ).fetchone()
-            connection.execute(
-                """
-                INSERT INTO emails (to_user_id, to_address, subject, body, sent_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (user_id, user["email"], "Appointment cancelled",
-                 f"The appointment on {when:%A %d %B} at {when:%H:%M} has been cancelled.",
-                 sent_at),
-            )
+        send_out_email(connection, appointment_id, 'cancellation') #Function under sending_emails.py to send out the email when the cancellation is done
     return True
 
+#Show patients' upcoming and cancelled appointments in different sections 
 def booking_summary_flow(connection, patient_id):
-    """Show the patient's upcoming appointments and let them cancel one."""
     while True:
         appointments = get_upcoming_appointments(connection, patient_id)
         if not appointments:
-            print("\nYou have no upcoming appointments.")
+            print("\nYou have no appointments booked,requested or cancelled.")
             return
 
-        print("\nYour upcoming appointments:")
-        numbered = {}
-        for number, row in enumerate(appointments, start=1):
-            when = datetime.datetime.fromisoformat(row["scheduled_time"])
-            name = get_practitioner_name(connection, row["practitioner_id"])
-            print(f"  {number}. {when:%a %d %B at %H:%M}  with {name}  -  {row['status']}")
-            numbered[number] = row["appointment_id"]
+        #Sort the appointments into the three groups by their status
+        confirmed = [row for row in appointments if row["status"] == "confirmed"]
+        requested = [row for row in appointments if row["status"] == "requested"]
+        cancelled = [row for row in appointments if row["status"] == "cancelled"]
 
-        choice = input("Enter a number to cancel that appointment, or B to go back: ").strip()
-        if choice.lower() in ('b', 'back'):
+        index = {}                                         
+        print_bookings(connection, "Upcoming Bookings", confirmed, index)
+        print_bookings(connection, "Requested Bookings", requested, index)
+        print_bookings(connection, "Cancelled Bookings", cancelled) #no index parsed in the function call --> cancelled appointments wont be numbered as they cant be cancelled again
+        print()
+
+        if not index:                                      
+            input("Press Enter to go back: ")
             return
-        if not (choice.isdigit() and int(choice) in numbered):
-            print(f"Please enter a number between 1 and {len(numbered)}, or B.")
+
+        choice = input("Enter a number to cancel that appointment, or 'b' to go back: ").strip()
+        if choice.lower() == 'b':
+            return
+        if not (choice.isdigit() and int(choice) in index):
+            print(f"Please enter a number between 1 and {len(index)}, or 'b'.")
             continue
 
         if not user_confirmation("Cancel this appointment?"):
             print("Nothing was cancelled.")
             continue
-        if cancel_appointment(connection, numbered[int(choice)], patient_id):
+        if cancel_appointment(connection, index[int(choice)], patient_id):
             print("Your appointment has been cancelled. A confirmation email has been sent.")
+            return
         else:
             print("That appointment could not be cancelled.")
-
+            return
 
 #----------------- Running the Query / Testing ---------------------------------------------
 
-with closing(sqlite3.connect(DATABASE_PATH)) as connection:
-    connection.row_factory = sqlite3.Row  # lets you use row["column_name"]
+#with closing(sqlite3.connect(DATABASE_PATH)) as connection:
+    #connection.row_factory = sqlite3.Row  # lets you use row["column_name"]
     #print(display_calendar(connection, 4))
     #(display_available_slots(connection,"mhwp1","2",date.today()+datetime.timedelta(1),date.today()+datetime.timedelta(2)))
     #booking_flow(connection,4) 
     #appointment_menu(connection,4)
-    #booking_summary(connection,4) 
+    #booking_summary_flow(connection,4) 
     #user = connection.execute("SELECT * FROM users WHERE user_id = ?", (4,)).fetchone()
     #patient_menu(connection,user)
     #appointment_menu(connection,4)
-
-#if __name__ == "__main__":
-#    with closing(sqlite3.connect(DATABASE_PATH)) as connection:
-#        connection.row_factory = sqlite3.Row
-#        appointment_menu(connection,4)
