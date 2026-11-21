@@ -8,6 +8,7 @@ from suicide_warning import (
     contains_suicide_warning_language,
     create_suicide_warning_alert,
 )
+from patient_view_emails import email_list
 
 def prompt_for_personal_detail(prompt: str) -> str | None:
     value = input(f"{prompt}: ").strip()
@@ -183,9 +184,10 @@ def patient_menu(connection,patient_id) -> None:
             "3. Urgent support numbers\n"
             "4. Appointments\n"
             "5. Meditation and relaxation resources\n"
-            "6. Log out\n"
+            "6. View Notifications\n"
+            "7. Log out\n"
         )
-        choice = input("Choose an option (1-6): ").strip()
+        choice = input("Choose an option (1-7): ").strip()
 
         match choice:
             case "1":
@@ -199,8 +201,10 @@ def patient_menu(connection,patient_id) -> None:
             case "5":
                 patient_resources(connection)
             case "6":
+                email_list(connection,patient_id)
+            case "7":
                 print("You have been logged out.")
                 return
             case _:
-                print("Please enter a number from 1 to 6.")
+                print("Please enter a number from 1 to 7.")
 
